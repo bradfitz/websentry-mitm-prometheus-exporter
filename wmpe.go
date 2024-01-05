@@ -38,6 +38,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 )
@@ -70,20 +71,68 @@ func main() {
 	log.Fatal(<-errc)
 }
 
+type valAtTime struct {
+	v float64
+	t time.Time
+}
+
 type proxy struct {
-	mu sync.Mutex
+	mu   sync.Mutex
+	v    map[string]valAtTime
+	keys []string // sorted keys of v
+}
+
+func (p *proxy) setMetric(name string, v float64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, ok := p.v[name]
+	if !ok {
+		p.keys = append(p.keys, name)
+		sort.Strings(p.keys)
+	}
+	if p.v == nil {
+		p.v = make(map[string]valAtTime)
+	}
+	p.v[name] = valAtTime{v: v, t: time.Now()}
+	log.Printf("%s now %.1f", name, v)
 }
 
 func (p *proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	switch req.URL.Path {
+	case "/metrics":
+		p.serveMetrics(w, req)
+	case "/":
+		p.serveIndex(w, req)
+	default:
+		http.NotFound(w, req)
+	}
+}
 
+func (p *proxy) serveIndex(w http.ResponseWriter, req *http.Request) {
 	io.WriteString(w, `<html><body><h1>WebSentry MITM Prometheus Exporter</h1>
 	<ul>
 	<li>TODO: add a web UI, show recent session hex/decoded dumps</li>
 	<li><a href="/metrics">/metrics</a></li>
 </ul>
 	`)
+}
+
+var startTime = time.Now()
+
+func (p *proxy) serveMetrics(w http.ResponseWriter, req *http.Request) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	fmt.Fprintf(w, "websentry_mitm_uptime %v\n", int64(time.Since(startTime).Seconds()))
+	tooOld := time.Now().Add(-5 * time.Minute)
+	for _, k := range p.keys {
+		m := p.v[k]
+		if m.t.Before(tooOld) {
+			continue
+		}
+		fmt.Fprintf(w, "%s %.1f\n", k, m.v)
+	}
 }
 
 func (p *proxy) serveWebsentry(ln net.Listener) error {
@@ -204,7 +253,7 @@ func (s *proxySession) addFrame(sender sender, b []byte) frame {
 			name := prop.String()
 			if name != "" {
 				val := float64(binary.BigEndian.Uint16(chunk[3:])) / 10
-				log.Printf("  %s: %.1f", name, val)
+				s.p.setMetric(name, val)
 			}
 		}
 	}
