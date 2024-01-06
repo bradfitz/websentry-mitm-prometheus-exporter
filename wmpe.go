@@ -522,7 +522,9 @@ var propName = map[propertyID]string{
 	0x0103: "serial_number",
 	0x0107: "date",
 	0x0108: "time",
-	0x0116: "", // type 3 with val 00 11 (decimal 17, maybe variant: "NE Modbus/LON?")
+	0x010b: "time_zone",            // 0x00 for GMT, 0x06 for PST (GMT, -03:30, AST -4, EST -5, CST -6, MST -7, PST -8, -9, -10)
+	0x0110: "serial_number_string", // 0x0103 but in string form
+	0x0116: "",                     // type 3 with val 00 11 (decimal 17, maybe variant: "NE Modbus/LON?")
 	0x0402: "ip_address",
 	0x0403: "subnet_mask",
 	0x0404: "gateway",    // or DNS server? TODO: check which way
@@ -532,11 +534,23 @@ var propName = map[propertyID]string{
 	0x0602: "supply_air_f",
 	0x0603: "outside_air_f",
 	0x0604: "pool_temp_f", // I think? Or it's temp in or temp out. But it seems to match the web UI closely.
-	0x1000: "",            // something with date type and value 2011-05-01
-	0x101d: "",            // some string, value "Off" (blower is currently on, though)
-	0x1163: "",            // some time 10:15am
-	0x1164: "",            // some time 10:30am
-	0x120d: "",            // some string, currently "Ready"
+	0x1000: "change_filter_date",
+	0x1001: "change_filter_months",
+	0x101d: "", // some string, value "Off" (blower is currently on, though)
+
+	0x1122: "sched1_days", //  0 none, 1 all, 2 m-f, 3 sat/sun, 0x04 sun ... 0x0a sat
+	0x1123: "sched1_occuped_time_on",
+	0x1124: "sched1_occuped_time_off",
+
+	0x1142: "sched2_days", //  0 none, 1 all, 2 m-f, 3 sat/sun, 0x04 sun ... 0x0a sat
+	0x1143: "sched2_occuped_time_on",
+	0x1144: "sched2_occuped_time_off",
+
+	0x1162: "sched3_days", //  0 none, 1 all, 2 m-f, 3 sat/sun, 0x04 sun ... 0x0a sat
+	0x1163: "sched3_occuped_time_on",
+	0x1164: "sched3_occuped_time_off",
+
+	0x120d: "", // some string, currently "Ready"
 	0x2003: "resolved_websentry_ip",
 	0x2500: "set_room_temp_f",
 	0x2501: "set_humidity_percent",
@@ -680,5 +694,33 @@ Then response is successful ACK ("00")?
 
 Set room temp (0x2500) to 85F: [ 4]: S: 03 25 00 03 00 55  (0x55 is 85)
 Set pool temp (0x2502) to 82F: [ 4]: S: 03 25 02 03 00 52  (0x52 is 82)
+
+Set change filters to Jan 9 2024, every 6 months: 2024/01/06 14:36:31 [ 4]: S: 03 10 01 03 00 06 10 00 0a 7c 01 09 00
+03
+   10 01
+      03 uint16 type
+	     00 06
+   10 00
+       0a date type
+	     7c 01 09 00  2024-1900/01/09
+
+Change sched 3 days from sat/sun to just sat:
+
+   2024/01/06 14:43:47 [ 4]: S: 03 11 62 03 00 0a
+   2024/01/06 14:43:48 prop_0x1162 changed [09 08 03] => [09 08 0a]
+
+   Vals: 0 none, 1 all, 2 m-f, 3 sat/sun, 0x04 sun ... 0x0a sat
+
+Change from PST (-0800 6th entry) to GMT (first):
+
+2024/01/06 14:47:58 [ 4]: S: 03 01 0b 03 00 00
+2024/01/06 14:47:58 prop_0x0108 ("time") changed 14:47 [ec 00] => 22:48 [00 00]
+
+From GMT back to PST:
+
+2024/01/06 14:50:05 prop_0x0108 ("time") changed 22:49 [10 00] => 22:50 [18 00]
+2024/01/06 14:50:05 [ 4]: S: 03 01 0b 03 00 06
+2024/01/06 14:50:05 prop_0x0108 ("time") changed 22:50 [18 00] => 14:50 [1c 00]
+2024/01/06 14:50:05 prop_0x010b changed [09 0b 00] => [09 0b 06]
 
 */
