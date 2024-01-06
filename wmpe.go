@@ -32,14 +32,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -271,7 +269,7 @@ type frame struct {
 	data   string // binary; including 7 byte header
 }
 
-func parsePropResponse(qf, f frame, onProp func(propID propertyID, val []byte)) {
+func parsePropResponse(qf, f frame, onProp func(propertyID, propertyValue)) {
 	if qf.sender != senderServer {
 		return
 	}
@@ -285,42 +283,35 @@ func parsePropResponse(qf, f frame, onProp func(propID propertyID, val []byte)) 
 		return
 	}
 
-	// TODO: remove this regexp construction. It's a temporary hack to learn
-	// the structure of the types and all the types bytes and sizes. Now that
-	// those are empirically known, we can write a specific parser for each type
-	// and not desperately search for a matching pattern. Also this isn't strictly
-	// correct. Unfortunate payload values can mess with the framing. But it was enough
-	// for debugging.
-	var rxBuf strings.Builder
-	rxBuf.WriteString("^")
+	rem := f.data[8:]
 	qrem := qf.data[8:]
-	for len(qrem) > 0 && len(qrem)%3 == 0 {
+	//log.Printf("PARSING\n qrem=% 02x\n  rem=% 02x\n", qrem, rem)
+
+	for len(qrem) >= 3 {
+		prop := qrem[:2]
+		//log.Printf("Step, prop % 02x:\n qrem=% 02x\n  rem=% 02x\n", prop, qrem, rem)
 		if qrem[2] != 0x0f {
 			log.Printf("unexpected third byte %02x in server query frame: % 02x", qrem[2], qf.data)
-			break
+			return
 		}
-		fmt.Fprintf(&rxBuf, `\b(% 02x)(.+)`, qrem[:2])
 		qrem = qrem[3:]
-	}
-	rxBuf.WriteString("$")
-
-	rx := regexp.MustCompile(rxBuf.String())
-	m := rx.FindStringSubmatch(fmt.Sprintf("% 02x", f.data[8:]))
-	if m == nil {
-		log.Printf("failed to parse pkt %v; match for %q", f.pktNum, rxBuf.String())
-		return
-	}
-	dehex := func(s string) []byte {
-		b, err := hex.DecodeString(strings.ReplaceAll(s, " ", ""))
-		if err != nil {
-			panic(err)
+		if !strings.HasPrefix(rem, prop) {
+			log.Printf("didn't find prop % 02x at beginning of % 02x", prop, rem)
+			return
 		}
-		return b
+		rem = rem[2:]
+		val, newRem, err := parsePropValue(rem)
+		if err != nil {
+			log.Printf("failed to parse prop % 02x value: %v", rem, err)
+			return
+		}
+		//log.Printf("  val=% 02x, newRem=% 02x\n", val.binary, newRem)
+
+		rem = newRem
+		onProp(propertyID(uint16(prop[1])|uint16(prop[0])<<8), val)
 	}
-	for i := 1; i < len(m); i += 2 {
-		prop := propertyID(binary.BigEndian.Uint16(dehex(m[i])))
-		val := dehex(m[i+1])
-		onProp(prop, val)
+	if len(qrem) != 0 {
+		log.Printf("unexpected trailing bytes in server query frame: % 02x", qrem)
 	}
 }
 
@@ -364,6 +355,53 @@ func (s *proxySession) addFrame(sender sender, b []byte) frame {
 	return f
 }
 
+func parsePropValue(p string) (val propertyValue, remain string, err error) {
+	if len(p) == 0 {
+		return val, "", fmt.Errorf("empty property value")
+	}
+	t := propertyType(p[0])
+
+	// Variable length string.
+	if t == 0x07 {
+		if len(p) < 2 {
+			return val, "", fmt.Errorf("short variable length string")
+		}
+		n := int(p[1])
+		if len(p) < 2+n {
+			return val, "", fmt.Errorf("short variable length string")
+		}
+		return propertyValue{binary: p[:2+n]}, p[2+n:], nil
+	}
+
+	var n int
+	switch t {
+	default:
+		return val, "", fmt.Errorf("unknown property type %02x", t)
+	case 1, 2:
+		n = 1
+	case 3, 6, 9:
+		n = 2
+	case 0x0a, 0x0b, 0x0c:
+		n = 4
+	case 5:
+		n = 4
+	case 8:
+		n = 7
+	}
+	if len(p) < 1+n {
+		return val, "", fmt.Errorf("short property value")
+	}
+	return propertyValue{binary: p[:1+n]}, p[1+n:], nil
+}
+
+type propertyType byte
+
+const (
+	propertyTypeInvalid        propertyType = 0
+	propertyTypeVarString      propertyType = 0x07
+	propertyTypeIP             propertyType = 0x0c
+	propertyTypeUint16TimesTen propertyType = 0x06
+
 // Type bytes:
 // 0x01: 1 byte (not bool; can be 0x05)
 // 0x02: 1 byte (not bool; can be 00, 01, 02, 03, ...)
@@ -376,6 +414,7 @@ func (s *proxySession) addFrame(sender sender, b []byte) frame {
 // 0x0a: 4 bytes
 // 0x0b: 4 bytes
 // 0x0c: 4 byte IP address
+)
 
 type propertyID uint16
 
@@ -413,6 +452,36 @@ func (p propertyID) String() string {
 	// TODO: what is 0x0610? Seems to match pool or air temp, but higher.
 
 	return "" // unknown
+}
+
+type propertyValue struct {
+	binary string // as binary, starting with the type byte
+}
+
+func (v propertyValue) String() string {
+	switch v.Type() {
+	case propertyTypeVarString:
+		if len(v.binary) > 2 {
+			return fmt.Sprintf("%q", v.binary[2:])
+		}
+	case propertyTypeIP:
+		if len(v.binary) == 5 {
+			return fmt.Sprintf("%d.%d.%d.%d", v.binary[1], v.binary[2], v.binary[3], v.binary[4])
+		}
+	case propertyTypeUint16TimesTen:
+		if len(v.binary) == 3 {
+			u16 := uint16(v.binary[1])<<8 | uint16(v.binary[2])
+			return fmt.Sprintf("%.1f", float64(u16)/10)
+		}
+	}
+	return fmt.Sprintf("[% 02x]", v.binary)
+}
+
+func (v propertyValue) Type() propertyType {
+	if len(v.binary) == 0 {
+		return propertyTypeInvalid
+	}
+	return propertyType(v.binary[0])
 }
 
 // copy copies from src to dst, logging each packet.
