@@ -523,6 +523,7 @@ var propName = map[propertyID]string{
 	0x0107: "date",
 	0x0108: "time",
 	0x010b: "time_zone",            // 0x00 for GMT, 0x06 for PST (GMT, -03:30, AST -4, EST -5, CST -6, MST -7, PST -8, -9, -10)
+	0x010e: "temp_unit",            // 0x03 for C, 0x04 for F; affects misc other properties?
 	0x0110: "serial_number_string", // 0x0103 but in string form
 	0x0116: "",                     // type 3 with val 00 11 (decimal 17, maybe variant: "NE Modbus/LON?")
 	0x0402: "ip_address",
@@ -722,5 +723,34 @@ From GMT back to PST:
 2024/01/06 14:50:05 [ 4]: S: 03 01 0b 03 00 06
 2024/01/06 14:50:05 prop_0x0108 ("time") changed 22:50 [18 00] => 14:50 [1c 00]
 2024/01/06 14:50:05 prop_0x010b changed [09 0b 00] => [09 0b 06]
+
+Change from F to C:
+2024/01/06 15:07:35 [ 4]: S: 03 01 0e 03 00 03
+
+Change from C to F:
+
+2024/01/06 15:08:39 sessions_started = 4
+2024/01/06 15:08:39 prop_0x0108 ("time") changed 15:07 [98 00] => 15:08 [a0 00]
+2024/01/06 15:08:39 [ 4]: S: 03 01 0e 03 00 04
+2024/01/06 15:08:39 prop_0x0108 ("time") changed 15:08 [a0 00] => 15:08 [a4 00]
+2024/01/06 15:08:40 prop_0x2500 ("set_room_temp_f") changed [08 00 1c 00 0c 00 23 01] => [08 00 53 00 37 00 5f 01]
+2024/01/06 15:08:40 prop_0x2502 ("set_pool_temp_f") changed [08 00 1b 00 0f 00 2a 01] => [08 00 52 00 3c 00 6c 01]
+2024/01/06 15:08:40 prop_0x2503 changed [08 00 20 00 04 00 20 01] => [08 00 5a 00 28 00 5a 01]
+2024/01/06 15:08:40 prop_0x2504 changed [08 00 07 ff fa 00 0c 01] => [08 00 2d 00 14 00 37 01]
+2024/01/06 15:08:40 prop_0x2505 changed [08 00 12 00 04 00 15 01] => [08 00 41 00 28 00 46 01]
+2024/01/06 15:08:40 prop_0x2506 changed [08 00 12 00 04 00 15 01] => [08 00 41 00 28 00 46 01]
+2024/01/06 15:08:40 prop_0x2508 changed [08 00 1e 00 01 00 41 01] => [08 00 56 00 23 00 96 01]
+2024/01/06 15:08:40 prop_0x250c changed [08 00 15 00 04 00 15 01] => [08 00 46 00 28 00 46 01]
+2024/01/06 15:08:41 prop_0x0600 ("humidity_percent") changed 51 => 50.9
+2024/01/06 15:08:41 prop_0x0603 ("outside_air_f") changed 55.7 => 55.6
+2024/01/06 15:08:41 prop_0x0606 changed 172.7 => 172.9
+2024/01/06 15:08:41 prop_0x0607 changed 177.9 => 177.5
+2024/01/06 15:08:41 prop_0x0609 changed 78.2 => 78.3
+2024/01/06 15:08:41 prop_0x0610 changed 70.8 => 70.7
+2024/01/06 15:08:41 prop_0x0e0c changed [03 00 09] => [03 00 04]
+2024/01/06 15:08:41 prop_0x1a18 changed [03 00 00] => [03 00 13]
+2024/01/06 15:08:42 sessions_ended = 4
+
+
 
 */
