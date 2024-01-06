@@ -456,12 +456,12 @@ func (p propertyID) String() string {
 }
 
 var propName = map[propertyID]string{
-	0x1000: "",               // something with date type and value 2011-05-01
 	0x0100: "version",        // same as version_string, but in 4 bytes
 	0x0101: "version_string", // e.g. "5.15.12"
 	0x0103: "serial_number",
 	0x0107: "date",
 	0x0108: "time",
+	0x0116: "", // type 3 with val 00 11 (decimal 17, maybe variant: "NE Modbus/LON?")
 	0x0402: "ip_address",
 	0x0403: "subnet_mask",
 	0x0404: "gateway",    // or DNS server? TODO: check which way
@@ -471,6 +471,7 @@ var propName = map[propertyID]string{
 	0x0602: "supply_air_f",
 	0x0603: "outside_air_f",
 	0x0604: "pool_temp_f", // I think? Or it's temp in or temp out. But it seems to match the web UI closely.
+	0x1000: "",            // something with date type and value 2011-05-01
 	0x101d: "",            // some string, value "Off" (blower is currently on, though)
 	0x1163: "",            // some time 10:15am
 	0x1164: "",            // some time 10:30am
