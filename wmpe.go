@@ -79,12 +79,23 @@ type valAtTime struct {
 	isCounter bool
 }
 
+// all fields guarded by (*proxy).mu
+type propStats struct {
+	prop       propertyID
+	last       propertyValue
+	lastStr    string    // String of Last
+	lastSet    time.Time // last change time
+	lastChange time.Time
+	queries    int
+	changes    int
+}
+
 type proxy struct {
 	mu          sync.Mutex
-	last        map[propertyID]string
-	v           map[string]valAtTime
-	keys        []string      // sorted keys of v
-	lastSession *proxySession // or nil
+	prop        map[propertyID]*propStats
+	v           map[string]valAtTime // prometheus metrics
+	keys        []string             // sorted keys of v
+	lastSession *proxySession        // or nil
 }
 
 func (p *proxy) incrMetric(name string) {
@@ -101,19 +112,30 @@ func (p *proxy) setMetric(name string, v float64) {
 	p.setMetricLocked(name, v, false)
 }
 
-func (p *proxy) notePropertyValue(prop propertyID, val string) {
+func (p *proxy) notePropertyValue(prop propertyID, val propertyValue) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	was := p.last[prop]
+	now := time.Now()
+	st, ok := p.prop[prop]
+	if !ok {
+		if p.prop == nil {
+			p.prop = map[propertyID]*propStats{}
+		}
+		st = &propStats{prop: prop}
+		p.prop[prop] = st
+	}
+	st.lastSet = now
+	st.queries++
+	was := st.last
 	if was == val {
-		// Unchanged.
 		return
 	}
-	if p.last == nil {
-		p.last = make(map[propertyID]string)
-	}
-	p.last[prop] = val
+	st.last = val
+	st.changes++
+	st.lastChange = now
+	st.lastStr = val.String()
+
 	if n := prop.Name(); n != "" {
 		log.Printf("%v (%q) changed %v => %v", prop.StringHex(), n, was, val)
 	} else {
@@ -141,6 +163,8 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.serveIndex(w, r)
 	case "/last":
 		p.serveLast(w, r)
+	case "/props":
+		p.serveProps(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -149,6 +173,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *proxy) serveIndex(w http.ResponseWriter, req *http.Request) {
 	io.WriteString(w, `<html><body><h1>WebSentry MITM Prometheus Exporter</h1>
 	<ul>
+	<li><a href="/props">/props</a> - current properties (last seen over all sessions)</li>
 	<li><a href="/last">/last</a> - last session dump</li>
 	<li><a href="/metrics">/metrics</a></li>
 </ul>
@@ -171,6 +196,36 @@ func (p *proxy) serveMetrics(w http.ResponseWriter, req *http.Request) {
 		}
 		fmt.Fprintf(w, "%s %.1f\n", k, m.v)
 	}
+}
+
+func (p *proxy) serveProps(w http.ResponseWriter, r *http.Request) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	fmt.Fprintf(w, "<html><body><h1>props</h1><table cellpadding=5 cellspacing=1 border=1>\n")
+
+	var ps []*propStats
+	for _, st := range p.prop {
+		ps = append(ps, st)
+	}
+	sort.Slice(ps, func(i, j int) bool {
+		return ps[i].prop < ps[j].prop
+	})
+
+	for _, st := range ps {
+
+		fmt.Fprintf(w, "<tr><td>%s</td><td>%s</td><td>%v</td><td>%v</td><td>%s</td><td>%s</td></tr>\n",
+			st.prop.StringHex(),
+			st.prop.Name(),
+			st.queries,
+			st.changes,
+			html.EscapeString(st.last.DecodedStringOrEmpty()),
+			html.EscapeString(st.last.StringHex()),
+		)
+	}
+
+	fmt.Fprintf(w, "</table></body></html>\n")
+
 }
 
 func (p *proxy) serveLast(w http.ResponseWriter, r *http.Request) {
@@ -357,6 +412,10 @@ func (f frame) isPropertyResponse() bool {
 	return f.sender == senderClient && len(f.data) > 7 && f.data[7] == 0x02
 }
 
+func (f frame) isChangeRequest() bool {
+	return f.sender == senderServer && len(f.data) > 7 && f.data[7] == 0x03
+}
+
 func (s *proxySession) addFrame(sender sender, b []byte) frame {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -377,12 +436,11 @@ func (s *proxySession) addFrame(sender sender, b []byte) frame {
 				}
 				s.p.setMetric(prop.StringHex(), v)
 			}
-			valStr := val.String()
-			s.p.notePropertyValue(prop, valStr)
+			s.p.notePropertyValue(prop, val)
 			if s.propVal == nil {
 				s.propVal = map[propertyID]string{}
 			}
-			s.propVal[prop] = valStr
+			s.propVal[prop] = val.String()
 		})
 	}
 
@@ -413,7 +471,7 @@ func parsePropValue(p string) (val propertyValue, remain string, err error) {
 		return val, "", fmt.Errorf("unknown property type %02x", t)
 	case 1, 2:
 		n = 1
-	case 3, 6, 9:
+	case 3, 4, 6, 9:
 		n = 2
 	case propertyTypeDate, propertyTypeTime, 0x0c:
 		n = 4
@@ -421,6 +479,8 @@ func parsePropValue(p string) (val propertyValue, remain string, err error) {
 		n = 4
 	case 8:
 		n = 7
+	case propertyTypeUint32:
+		n = 4
 	}
 	if len(p) < 1+n {
 		return val, "", fmt.Errorf("short property value")
@@ -438,6 +498,7 @@ const (
 	propertyTypeDate           propertyType = 0x0a // 4 bytes: 7a 06 16 00 = year-1900, month, month_day, always_zero?
 	propertyTypeTime           propertyType = 0x0b // 4 bytes: hour, min, something bigger than seconds, zero
 	propertyTypeVersion        propertyType = 0x05 // [05 00 05 0f 0c] for version 5.15.12
+	propertyTypeUint32         propertyType = 0x12 // 4 bytes (for serial numbrer at least)
 	// TODO: what are these? only their sizes are known.
 	// 0x01: 1 byte (not bool; can be 0x05)
 	// 0x02: 1 byte (not bool; can be 00, 01, 02, 03, ...)
@@ -477,6 +538,9 @@ var propName = map[propertyID]string{
 	0x1164: "",            // some time 10:30am
 	0x120d: "",            // some string, currently "Ready"
 	0x2003: "resolved_websentry_ip",
+	0x2500: "set_room_temp_f",
+	0x2501: "set_humidity_percent",
+	0x2502: "set_pool_temp_f", // also seems to be a copy in 0x250d?
 	// TODO: what is 0x0605? Also water-temp-ish.
 	// TODO: what is 0x0606? It's like 165-200-ish (after divide by 10). Compressor temp?
 	// TODO: what is 0x0607? Similar to 0606 in range but a bit higher usually. Other header bit?
@@ -498,7 +562,21 @@ type propertyValue struct {
 	binary string // as binary, starting with the type byte
 }
 
+func (v propertyValue) StringHex() string {
+	if v.binary == "" {
+		return "[empty]"
+	}
+	return fmt.Sprintf("[% 02x]", v.binary)
+}
+
 func (v propertyValue) String() string {
+	if s := v.DecodedStringOrEmpty(); s != "" {
+		return s
+	}
+	return v.StringHex()
+}
+
+func (v propertyValue) DecodedStringOrEmpty() string {
 	if f, ok := v.Float64(); ok {
 		return fmt.Sprint(f)
 	}
@@ -525,8 +603,12 @@ func (v propertyValue) String() string {
 		if len(v.binary) == 5 {
 			return fmt.Sprintf("%d.%d.%d.%d", v.binary[1], v.binary[2], v.binary[3], v.binary[4])
 		}
+	case propertyTypeUint32:
+		if len(v.binary) == 5 {
+			return fmt.Sprintf("%d", uint32(v.binary[1])<<24|uint32(v.binary[2])<<16|uint32(v.binary[3])<<8|uint32(v.binary[4]))
+		}
 	}
-	return fmt.Sprintf("[% 02x]", v.binary)
+	return ""
 }
 
 func (v propertyValue) Type() propertyType {
@@ -573,7 +655,7 @@ func (s *proxySession) copy(sender sender, src, dst *net.TCPConn) error {
 		}
 		totalLen := pktHeaderLen + payLen
 		f := s.addFrame(sender, buf[:totalLen])
-		if *verbose {
+		if *verbose || f.isChangeRequest() {
 			log.Printf("[%2d]: %s: % 02x", f.pktNum, f.sender, f.data[pktHeaderLen:])
 		}
 		_, err = dst.Write(buf[:totalLen])
@@ -591,9 +673,12 @@ Change request from server to client, spectator mode on for one hour:
 
    03     # change request
    01 1c  # spectator mode
-   03     # duration type in hours?
+   03     # uint16 type
    00 01  # one hour
 
 Then response is successful ACK ("00")?
+
+Set room temp (0x2500) to 85F: [ 4]: S: 03 25 00 03 00 55  (0x55 is 85)
+Set pool temp (0x2502) to 82F: [ 4]: S: 03 25 02 03 00 52  (0x52 is 82)
 
 */
