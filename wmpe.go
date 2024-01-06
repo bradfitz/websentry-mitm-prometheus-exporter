@@ -29,15 +29,15 @@ iptables -t nat -I PREROUTING 1 -s 10.15.25.34 -p tcp -m multiport --dports 1030
 */
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"flag"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -45,6 +45,7 @@ import (
 )
 
 var (
+	verbose        = flag.Bool("verbose", false, "verbose logging")
 	flagListen     = flag.String("listen", ":1030", "listen address for binary protocol")
 	flagListenHTTP = flag.String("listen-http", ":1031", "listen address for the prometheus exporter (serving at /metrics)")
 )
@@ -80,6 +81,7 @@ type valAtTime struct {
 
 type proxy struct {
 	mu          sync.Mutex
+	last        map[propertyID]string
 	v           map[string]valAtTime
 	keys        []string      // sorted keys of v
 	lastSession *proxySession // or nil
@@ -90,13 +92,33 @@ func (p *proxy) incrMetric(name string) {
 	defer p.mu.Unlock()
 	m := p.v[name]
 	p.setMetricLocked(name, m.v+1, true)
-
+	log.Printf("%v = %v", name, m.v+1)
 }
 
 func (p *proxy) setMetric(name string, v float64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.setMetricLocked(name, v, false)
+}
+
+func (p *proxy) notePropertyValue(prop propertyID, val string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	was := p.last[prop]
+	if was == val {
+		// Unchanged.
+		return
+	}
+	if p.last == nil {
+		p.last = make(map[propertyID]string)
+	}
+	p.last[prop] = val
+	if n := prop.Name(); n != "" {
+		log.Printf("%v (%q) changed %v => %v", prop.StringHex(), n, was, val)
+	} else {
+		log.Printf("%v changed %v => %v", prop.StringHex(), was, val)
+	}
 }
 
 func (p *proxy) setMetricLocked(name string, v float64, isCounter bool) {
@@ -109,7 +131,6 @@ func (p *proxy) setMetricLocked(name string, v float64, isCounter bool) {
 		p.v = make(map[string]valAtTime)
 	}
 	p.v[name] = valAtTime{v: v, t: time.Now(), isCounter: isCounter}
-	log.Printf("%s now %.1f", name, v)
 }
 
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -170,7 +191,23 @@ func (p *proxy) serveLast(w http.ResponseWriter, r *http.Request) {
 	for _, f := range s.frames {
 		fmt.Fprintf(w, "[%2d]: %s: % 02x\n", f.pktNum, f.sender, f.data[pktHeaderLen:])
 	}
-	fmt.Fprintf(w, "</pre>\n</body></html>\n")
+	fmt.Fprintf(w, "</pre><h2>props</h2><table>\n")
+
+	var keys []propertyID
+	for k := range s.propVal {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
+	for _, k := range keys {
+		fmt.Fprintf(w, "<tr><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+			k.StringHex(),
+			k.Name(),
+			html.EscapeString(s.propVal[k]),
+		)
+	}
+
+	fmt.Fprintf(w, "</table></body></html>\n")
 }
 
 func (p *proxy) serveWebsentry(ln net.Listener) error {
@@ -223,9 +260,10 @@ type proxySession struct {
 	c    *net.TCPConn // incoming (from unit)
 	outc *net.TCPConn
 
-	mu     sync.Mutex
-	pktNum uint8
-	frames []frame
+	mu      sync.Mutex
+	pktNum  uint8
+	frames  []frame
+	propVal map[propertyID]string
 }
 
 func (s *proxySession) run() {
@@ -315,6 +353,10 @@ func parsePropResponse(qf, f frame, onProp func(propertyID, propertyValue)) {
 	}
 }
 
+func (f frame) isPropertyResponse() bool {
+	return f.sender == senderClient && len(f.data) > 7 && f.data[7] == 0x02
+}
+
 func (s *proxySession) addFrame(sender sender, b []byte) frame {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -326,30 +368,22 @@ func (s *proxySession) addFrame(sender sender, b []byte) frame {
 	}
 	s.frames = append(s.frames, f)
 
-	pay := b[pktHeaderLen:]
-	if sender == senderClient && bytes.HasPrefix(pay, []byte{0x02, 0x06, 0, 0x06}) {
+	if f.isPropertyResponse() && len(s.frames) >= 2 {
 		qf := s.frames[len(s.frames)-2]
-		_ = qf
-		// TODO:	parsePropResponse(qf, f, func(prop propertyID, val []byte) {
-
-		// This is the client sending its key vital temperatures/humidity.
-		// 2024/01/05 10:25:37 [ 5]: C: 02 06 00 06 02 08 06 01 06 02 73 06 02 06 02 a5 06 03 06 02 33 06 04 06 02 4c 06 05 06 02 4d 06 06 06 06 ae 06 07 06 06 df 06 08 06 02 3c 06 09 06 03 0e 06 0a 06 00 a8 06 10 06 02 c6
-		remain := pay[1:]
-		for len(remain) > 0 && len(remain)%5 == 0 {
-			chunk := remain[:5] // 2 bytes property ID uint16, 1 byte type (?), 2 bytes uint16
-			remain = remain[5:]
-			if chunk[2] != 0x06 {
-				// type byte? 6 might mean uint16? But empirically it's always 6.
-				// Skip if it's not.
-				continue
+		parsePropResponse(qf, f, func(prop propertyID, val propertyValue) {
+			if v, ok := val.Float64(); ok {
+				if name := prop.String(); name != "" {
+					s.p.setMetric(name, v)
+				}
+				s.p.setMetric(prop.StringHex(), v)
 			}
-			prop := propertyID(binary.BigEndian.Uint16(chunk[:2]))
-			name := prop.String()
-			if name != "" {
-				val := float64(binary.BigEndian.Uint16(chunk[3:])) / 10
-				s.p.setMetric(name, val)
+			valStr := val.String()
+			s.p.notePropertyValue(prop, valStr)
+			if s.propVal == nil {
+				s.propVal = map[propertyID]string{}
 			}
-		}
+			s.propVal[prop] = valStr
+		})
 	}
 
 	return f
@@ -381,7 +415,7 @@ func parsePropValue(p string) (val propertyValue, remain string, err error) {
 		n = 1
 	case 3, 6, 9:
 		n = 2
-	case 0x0a, 0x0b, 0x0c:
+	case propertyTypeDate, propertyTypeTime, 0x0c:
 		n = 4
 	case 5:
 		n = 4
@@ -398,51 +432,50 @@ type propertyType byte
 
 const (
 	propertyTypeInvalid        propertyType = 0
-	propertyTypeVarString      propertyType = 0x07
-	propertyTypeIP             propertyType = 0x0c
-	propertyTypeUint16TimesTen propertyType = 0x06
-
-// Type bytes:
-// 0x01: 1 byte (not bool; can be 0x05)
-// 0x02: 1 byte (not bool; can be 00, 01, 02, 03, ...)
-// 0x03: 2 bytes
-// 0x05: 5 bytes
-// 0x06: 2 byte uint16 (times ten); can be F or percent
-// 0x07: variable length string, one length byte, then that many bytes of string
-// 0x08: 7 bytes (e.g. "00 5a 00 00 00 64 05" or often "00 00 00 00 00 64 05")
-// 0x09: 2 bytes
-// 0x0a: 4 bytes
-// 0x0b: 4 bytes
-// 0x0c: 4 byte IP address
+	propertyTypeVarString      propertyType = 0x07 // variable length string, one length byte, then that many bytes of string
+	propertyTypeIP             propertyType = 0x0c // 4 byte IP address
+	propertyTypeUint16TimesTen propertyType = 0x06 // value times ten as a uint16
+	propertyTypeDate           propertyType = 0x0a // 4 bytes: 7a 06 16 00 = year-1900, month, month_day, always_zero?
+	propertyTypeTime           propertyType = 0x0b // 4 bytes: hour, min, something bigger than seconds, zero
+	propertyTypeVersion        propertyType = 0x05 // [05 00 05 0f 0c] for version 5.15.12
+	// TODO: what are these? only their sizes are known.
+	// 0x01: 1 byte (not bool; can be 0x05)
+	// 0x02: 1 byte (not bool; can be 00, 01, 02, 03, ...)
+	// 0x03: 2 bytes
+	// 0x08: 7 bytes (e.g. "00 5a 00 00 00 64 05" or often "00 00 00 00 00 64 05")
+	// 0x09: 2 bytes
 )
 
 type propertyID uint16
 
 func (p propertyID) String() string {
-	switch p {
-	case 0x0600:
-		return "humidity_percent"
-	case 0x0601:
-		return "room_temp_f"
-	case 0x0602:
-		return "supply_air_f"
-	case 0x0603:
-		return "outside_air_f"
-	case 0x0604:
-		return "pool_temp_f" // I think? Or it's temp in or temp out. But it seems to match the web UI closely.
-	case 0x0101:
-		return "version" // e.g. "5.15.12"
-	case 0x0103:
-		return "serial_number"
-	case 0x0402:
-		return "ip_address"
-	case 0x0403:
-		return "subnet_mask"
-	case 0x0404:
-		return "gateway" // or DNS server? TODO: check which way
-	case 0x0405:
-		return "dns_server" // or gateway? TODO: check which way
+	if n := p.Name(); n != "" {
+		return n
 	}
+	return p.StringHex()
+}
+
+var propName = map[propertyID]string{
+	0x1000: "",               // something with date type and value 2011-05-01
+	0x0100: "version",        // same as version_string, but in 4 bytes
+	0x0101: "version_string", // e.g. "5.15.12"
+	0x0103: "serial_number",
+	0x0107: "date",
+	0x0108: "time",
+	0x0402: "ip_address",
+	0x0403: "subnet_mask",
+	0x0404: "gateway",    // or DNS server? TODO: check which way
+	0x0405: "dns_server", // or gateway? TODO: check which way
+	0x0600: "humidity_percent",
+	0x0601: "room_temp_f",
+	0x0602: "supply_air_f",
+	0x0603: "outside_air_f",
+	0x0604: "pool_temp_f", // I think? Or it's temp in or temp out. But it seems to match the web UI closely.
+	0x101d: "",            // some string, value "Off" (blower is currently on, though)
+	0x1163: "",            // some time 10:15am
+	0x1164: "",            // some time 10:30am
+	0x120d: "",            // some string, currently "Ready"
+	0x2003: "resolved_websentry_ip",
 	// TODO: what is 0x0605? Also water-temp-ish.
 	// TODO: what is 0x0606? It's like 165-200-ish (after divide by 10). Compressor temp?
 	// TODO: what is 0x0607? Similar to 0606 in range but a bit higher usually. Other header bit?
@@ -450,8 +483,14 @@ func (p propertyID) String() string {
 	// TODO: what is 0x0609?
 	// TODO: what is 0x060a? Often like 16-27 after divide by 10.
 	// TODO: what is 0x0610? Seems to match pool or air temp, but higher.
+}
 
-	return "" // unknown
+func (p propertyID) Name() string {
+	return propName[p]
+}
+
+func (p propertyID) StringHex() string {
+	return fmt.Sprintf("prop_0x%02x%02x", byte(p>>8), byte(p))
 }
 
 type propertyValue struct {
@@ -459,6 +498,9 @@ type propertyValue struct {
 }
 
 func (v propertyValue) String() string {
+	if f, ok := v.Float64(); ok {
+		return fmt.Sprint(f)
+	}
 	switch v.Type() {
 	case propertyTypeVarString:
 		if len(v.binary) > 2 {
@@ -468,10 +510,19 @@ func (v propertyValue) String() string {
 		if len(v.binary) == 5 {
 			return fmt.Sprintf("%d.%d.%d.%d", v.binary[1], v.binary[2], v.binary[3], v.binary[4])
 		}
-	case propertyTypeUint16TimesTen:
-		if len(v.binary) == 3 {
-			u16 := uint16(v.binary[1])<<8 | uint16(v.binary[2])
-			return fmt.Sprintf("%.1f", float64(u16)/10)
+	case propertyTypeDate:
+		if len(v.binary) == 5 {
+			return fmt.Sprintf("%04d-%02d-%02d", int(v.binary[1])+1900, v.binary[2], v.binary[3])
+		}
+	case propertyTypeTime:
+		if len(v.binary) == 5 {
+			// [0b 0b 09 78 00] at 11:09am. 0x78 is too big for seconds? Tenths of seconds?
+			// TODO: figure out seconds, or what the third byte means.
+			return fmt.Sprintf("%02d:%02d [% 02x]", v.binary[1], v.binary[2], v.binary[3:])
+		}
+	case propertyTypeVersion:
+		if len(v.binary) == 5 {
+			return fmt.Sprintf("%d.%d.%d.%d", v.binary[1], v.binary[2], v.binary[3], v.binary[4])
 		}
 	}
 	return fmt.Sprintf("[% 02x]", v.binary)
@@ -482,6 +533,17 @@ func (v propertyValue) Type() propertyType {
 		return propertyTypeInvalid
 	}
 	return propertyType(v.binary[0])
+}
+
+func (v propertyValue) Float64() (_ float64, ok bool) {
+	switch v.Type() {
+	case propertyTypeUint16TimesTen:
+		if len(v.binary) == 3 {
+			u16 := uint16(v.binary[1])<<8 | uint16(v.binary[2])
+			return float64(u16) / 10, true
+		}
+	}
+	return 0, false
 }
 
 // copy copies from src to dst, logging each packet.
@@ -510,10 +572,27 @@ func (s *proxySession) copy(sender sender, src, dst *net.TCPConn) error {
 		}
 		totalLen := pktHeaderLen + payLen
 		f := s.addFrame(sender, buf[:totalLen])
-		log.Printf("[%2d]: %s: % 02x", f.pktNum, f.sender, f.data[pktHeaderLen:])
+		if *verbose {
+			log.Printf("[%2d]: %s: % 02x", f.pktNum, f.sender, f.data[pktHeaderLen:])
+		}
 		_, err = dst.Write(buf[:totalLen])
 		if err != nil {
 			return fmt.Errorf("%s: write to peer error: %v", sender, err)
 		}
 	}
 }
+
+/*
+Change request from server to client, spectator mode on for one hour:
+
+[ 4]: S: 03 10 1c 03 00 01
+[ 5]: C: 03 10 1c 00
+
+   03     # change request
+   01 1c  # spectator mode
+   03     # duration type in hours?
+   00 01  # one hour
+
+Then response is successful ACK ("00")?
+
+*/
