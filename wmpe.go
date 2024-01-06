@@ -32,13 +32,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -72,19 +75,33 @@ func main() {
 }
 
 type valAtTime struct {
-	v float64
-	t time.Time
+	v         float64
+	t         time.Time
+	isCounter bool
 }
 
 type proxy struct {
-	mu   sync.Mutex
-	v    map[string]valAtTime
-	keys []string // sorted keys of v
+	mu          sync.Mutex
+	v           map[string]valAtTime
+	keys        []string      // sorted keys of v
+	lastSession *proxySession // or nil
+}
+
+func (p *proxy) incrMetric(name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	m := p.v[name]
+	p.setMetricLocked(name, m.v+1, true)
+
 }
 
 func (p *proxy) setMetric(name string, v float64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.setMetricLocked(name, v, false)
+}
+
+func (p *proxy) setMetricLocked(name string, v float64, isCounter bool) {
 	_, ok := p.v[name]
 	if !ok {
 		p.keys = append(p.keys, name)
@@ -93,25 +110,27 @@ func (p *proxy) setMetric(name string, v float64) {
 	if p.v == nil {
 		p.v = make(map[string]valAtTime)
 	}
-	p.v[name] = valAtTime{v: v, t: time.Now()}
+	p.v[name] = valAtTime{v: v, t: time.Now(), isCounter: isCounter}
 	log.Printf("%s now %.1f", name, v)
 }
 
-func (p *proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	switch req.URL.Path {
+func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.Path {
 	case "/metrics":
-		p.serveMetrics(w, req)
+		p.serveMetrics(w, r)
 	case "/":
-		p.serveIndex(w, req)
+		p.serveIndex(w, r)
+	case "/last":
+		p.serveLast(w, r)
 	default:
-		http.NotFound(w, req)
+		http.NotFound(w, r)
 	}
 }
 
 func (p *proxy) serveIndex(w http.ResponseWriter, req *http.Request) {
 	io.WriteString(w, `<html><body><h1>WebSentry MITM Prometheus Exporter</h1>
 	<ul>
-	<li>TODO: add a web UI, show recent session hex/decoded dumps</li>
+	<li><a href="/last">/last</a> - last session dump</li>
 	<li><a href="/metrics">/metrics</a></li>
 </ul>
 	`)
@@ -128,11 +147,32 @@ func (p *proxy) serveMetrics(w http.ResponseWriter, req *http.Request) {
 	tooOld := time.Now().Add(-5 * time.Minute)
 	for _, k := range p.keys {
 		m := p.v[k]
-		if m.t.Before(tooOld) {
+		if !m.isCounter && m.t.Before(tooOld) {
 			continue
 		}
 		fmt.Fprintf(w, "%s %.1f\n", k, m.v)
 	}
+}
+
+func (p *proxy) serveLast(w http.ResponseWriter, r *http.Request) {
+	p.mu.Lock()
+	s := p.lastSession
+	p.mu.Unlock()
+
+	if s == nil {
+		http.Error(w, "no last session (yet?)", 404)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	fmt.Fprintf(w, "<html><body><h1>last session</h1>")
+	fmt.Fprintf(w, "<pre>\n")
+	for _, f := range s.frames {
+		fmt.Fprintf(w, "[%2d]: %s: % 02x\n", f.pktNum, f.sender, f.data[pktHeaderLen:])
+	}
+	fmt.Fprintf(w, "</pre>\n</body></html>\n")
 }
 
 func (p *proxy) serveWebsentry(ln net.Listener) error {
@@ -154,6 +194,8 @@ func (p *proxy) serveWebsentry(ln net.Listener) error {
 const pktHeaderLen = 7
 
 func (p *proxy) handleWebsentryConn(c *net.TCPConn) {
+	p.incrMetric("sessions_started")
+	defer p.incrMetric("sessions_ended")
 	defer c.Close()
 
 	var d net.Dialer
@@ -172,6 +214,10 @@ func (p *proxy) handleWebsentryConn(c *net.TCPConn) {
 		outc: outc.(*net.TCPConn),
 	}
 	s.run()
+
+	p.mu.Lock()
+	p.lastSession = s
+	p.mu.Unlock()
 }
 
 type proxySession struct {
@@ -225,6 +271,59 @@ type frame struct {
 	data   string // binary; including 7 byte header
 }
 
+func parsePropResponse(qf, f frame, onProp func(propID propertyID, val []byte)) {
+	if qf.sender != senderServer {
+		return
+	}
+	if f.sender != senderClient {
+		return
+	}
+	if qf.data[7] != 0x02 {
+		return
+	}
+	if f.data[7] != 0x02 {
+		return
+	}
+
+	// TODO: remove this regexp construction. It's a temporary hack to learn
+	// the structure of the types and all the types bytes and sizes. Now that
+	// those are empirically known, we can write a specific parser for each type
+	// and not desperately search for a matching pattern. Also this isn't strictly
+	// correct. Unfortunate payload values can mess with the framing. But it was enough
+	// for debugging.
+	var rxBuf strings.Builder
+	rxBuf.WriteString("^")
+	qrem := qf.data[8:]
+	for len(qrem) > 0 && len(qrem)%3 == 0 {
+		if qrem[2] != 0x0f {
+			log.Printf("unexpected third byte %02x in server query frame: % 02x", qrem[2], qf.data)
+			break
+		}
+		fmt.Fprintf(&rxBuf, `\b(% 02x)(.+)`, qrem[:2])
+		qrem = qrem[3:]
+	}
+	rxBuf.WriteString("$")
+
+	rx := regexp.MustCompile(rxBuf.String())
+	m := rx.FindStringSubmatch(fmt.Sprintf("% 02x", f.data[8:]))
+	if m == nil {
+		log.Printf("failed to parse pkt %v; match for %q", f.pktNum, rxBuf.String())
+		return
+	}
+	dehex := func(s string) []byte {
+		b, err := hex.DecodeString(strings.ReplaceAll(s, " ", ""))
+		if err != nil {
+			panic(err)
+		}
+		return b
+	}
+	for i := 1; i < len(m); i += 2 {
+		prop := propertyID(binary.BigEndian.Uint16(dehex(m[i])))
+		val := dehex(m[i+1])
+		onProp(prop, val)
+	}
+}
+
 func (s *proxySession) addFrame(sender sender, b []byte) frame {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -238,6 +337,10 @@ func (s *proxySession) addFrame(sender sender, b []byte) frame {
 
 	pay := b[pktHeaderLen:]
 	if sender == senderClient && bytes.HasPrefix(pay, []byte{0x02, 0x06, 0, 0x06}) {
+		qf := s.frames[len(s.frames)-2]
+		_ = qf
+		// TODO:	parsePropResponse(qf, f, func(prop propertyID, val []byte) {
+
 		// This is the client sending its key vital temperatures/humidity.
 		// 2024/01/05 10:25:37 [ 5]: C: 02 06 00 06 02 08 06 01 06 02 73 06 02 06 02 a5 06 03 06 02 33 06 04 06 02 4c 06 05 06 02 4d 06 06 06 06 ae 06 07 06 06 df 06 08 06 02 3c 06 09 06 03 0e 06 0a 06 00 a8 06 10 06 02 c6
 		remain := pay[1:]
@@ -261,6 +364,19 @@ func (s *proxySession) addFrame(sender sender, b []byte) frame {
 	return f
 }
 
+// Type bytes:
+// 0x01: 1 byte (not bool; can be 0x05)
+// 0x02: 1 byte (not bool; can be 00, 01, 02, 03, ...)
+// 0x03: 2 bytes
+// 0x05: 5 bytes
+// 0x06: 2 byte uint16 (times ten); can be F or percent
+// 0x07: variable length string, one length byte, then that many bytes of string
+// 0x08: 7 bytes (e.g. "00 5a 00 00 00 64 05" or often "00 00 00 00 00 64 05")
+// 0x09: 2 bytes
+// 0x0a: 4 bytes
+// 0x0b: 4 bytes
+// 0x0c: 4 byte IP address
+
 type propertyID uint16
 
 func (p propertyID) String() string {
@@ -275,6 +391,18 @@ func (p propertyID) String() string {
 		return "outside_air_f"
 	case 0x0604:
 		return "pool_temp_f" // I think? Or it's temp in or temp out. But it seems to match the web UI closely.
+	case 0x0101:
+		return "version" // e.g. "5.15.12"
+	case 0x0103:
+		return "serial_number"
+	case 0x0402:
+		return "ip_address"
+	case 0x0403:
+		return "subnet_mask"
+	case 0x0404:
+		return "gateway" // or DNS server? TODO: check which way
+	case 0x0405:
+		return "dns_server" // or gateway? TODO: check which way
 	}
 	// TODO: what is 0x0605? Also water-temp-ish.
 	// TODO: what is 0x0606? It's like 165-200-ish (after divide by 10). Compressor temp?
