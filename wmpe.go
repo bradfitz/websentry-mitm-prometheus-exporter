@@ -1,19 +1,21 @@
-// The websentry-mitm-prometheus-exporter is a MITM proxy server
-// for the WebSentry port 1030 protocol between WebSentry-capable
-// dehumidifiers (see https://dehumidifiedairsolutions.com/) and
-// its cloud service (TCP websentry.seresco.net:1030).
+// The websentry-mitm-prometheus-exporter is a MITM proxy server for the
+// WebSentry port 1030 protocol between WebSentry-capable dehumidifiers (see
+// https://dehumidifiedairsolutions.com/) and its cloud service (TCP
+// websentry.seresco.net:1030).
 //
-// Assuming you set up DHCP + iptables to intercept the traffic and
-// poiint it at this proxy, this proxy then relays it onwards upstream,
-// parsing its contents and exposing a Prometheus metrics endpoint
+// Assuming you set up fake DNS entries or DHCP + iptables to intercept the
+// traffic and point it at this proxy, this proxy then relays it onwards
+// upstream, parsing its contents and exposing a Prometheus metrics endpoint
 // that can be scraped by Prometheus.
 //
-// This is all because I didn't want to wire up yet another MODBUS
-// thingy to my HVAC system.
+// This is all because I didn't want to wire up yet another MODBUS thingy to my
+// HVAC system.
 //
-// Disclaimer: this has been tested on exactly one system (mine)
-// and reverse engineered by eyeballing the binary traffic. It
-// may or may not work for you. (Or for me.)
+// Disclaimer: this has been tested on exactly one system (mine) and reverse
+// engineered by eyeballing the binary traffic. It may or may not work for you.
+// (Or for me.)
+//
+// For protocol details, see https://github.com/bradfitz/websentry-mitm-prometheus-exporter/blob/main/websentry-protocol.md
 package main
 
 /*
