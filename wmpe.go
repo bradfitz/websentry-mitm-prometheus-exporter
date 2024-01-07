@@ -496,7 +496,7 @@ const (
 	propertyTypeIP             propertyType = 0x0c // 4 byte IP address
 	propertyTypeUint16TimesTen propertyType = 0x06 // value times ten as a uint16
 	propertyTypeDate           propertyType = 0x0a // 4 bytes: 7a 06 16 00 = year-1900, month, month_day, always_zero?
-	propertyTypeTime           propertyType = 0x0b // 4 bytes: hour, min, something bigger than seconds, zero
+	propertyTypeTime           propertyType = 0x0b // 4 bytes: hour, min, (seconds<<2), zero
 	propertyTypeVersion        propertyType = 0x05 // [05 00 05 0f 0c] for version 5.15.12
 	propertyTypeUint32         propertyType = 0x12 // 4 bytes (for serial numbrer at least)
 	// TODO: what are these? only their sizes are known.
@@ -626,9 +626,7 @@ func (v propertyValue) DecodedStringOrEmpty() string {
 		}
 	case propertyTypeTime:
 		if len(v.binary) == 5 {
-			// [0b 0b 09 78 00] at 11:09am. 0x78 is too big for seconds? Tenths of seconds?
-			// TODO: figure out seconds, or what the third byte means.
-			return fmt.Sprintf("%02d:%02d [% 02x]", v.binary[1], v.binary[2], v.binary[3:])
+			return fmt.Sprintf("%02d:%02d:%02d", v.binary[1], v.binary[2], v.binary[3]>>2)
 		}
 	case propertyTypeVersion:
 		if len(v.binary) == 5 {
@@ -835,6 +833,38 @@ System restart:
 18:56:47 [ 4]: S: 03 01 1a 03 00 01
 2024/01/06 18:56:47 prop_0x120d changed "Ready" => "Disabled"
 2024/01/06 18:56:47 prop_0x120e changed [02 02] => [02 00]
+
+
+# decoding time type's 3rd byte, some stats...
+
+first nibble of third byte, never starts with 0xf
+
+[root@tox:~]# less proxy.log  | grep time | perl -ne 'm,\[(.), and print $1 . "\n"' | sort |uniq -c | sort -k 2
+     46 0
+     40 1
+     47 2
+     50 3
+     40 4
+     50 5
+     46 6
+     45 7
+     46 8
+     46 9
+     49 a
+     52 b
+     44 c
+     50 d
+     50 e
+
+ second nibble of 3rd byte:
+
+[root@tox:~]# less proxy.log  | grep time | perl -ne 'm,\[.(.), and print $1 . "\n"' | sort |uniq -c | sort -k 2 | less
+    168 0
+    185 4
+    166 8
+    179 c
+
+
 
 
 */
