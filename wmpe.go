@@ -559,7 +559,8 @@ var propName = map[propertyID]string{
 	0x1163: "sched3_occuped_time_on",
 	0x1164: "sched3_occuped_time_off",
 
-	0x120d: "", // some string, currently "Ready"
+	0x120d: "blower_state_string", // I think? like "Ready" or "Disabled"
+	0x120e: "blower_state",        // 0x00 off, 0x02 on
 	0x2003: "resolved_websentry_ip",
 	0x2500: "set_room_temp_f",
 	0x2501: "set_humidity_percent",
