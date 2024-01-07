@@ -526,18 +526,26 @@ var propName = map[propertyID]string{
 	0x010e: "temp_unit",            // 0x03 for C, 0x04 for F; affects misc other properties?
 	0x0110: "serial_number_string", // 0x0103 but in string form
 	0x0116: "",                     // type 3 with val 00 11 (decimal 17, maybe variant: "NE Modbus/LON?")
+	0x011a: "set_reboot",           // "S: 03 01 1a 03 00 01" to reboot
+
+	0x0311: "set_event_time_hours",
+	0x030d: "set_purge_time_minutes",
+
 	0x0402: "ip_address",
 	0x0403: "subnet_mask",
 	0x0404: "gateway",    // or DNS server? TODO: check which way
 	0x0405: "dns_server", // or gateway? TODO: check which way
+
 	0x0600: "humidity_percent",
 	0x0601: "room_temp_f",
 	0x0602: "supply_air_f",
 	0x0603: "outside_air_f",
 	0x0604: "pool_temp_f", // I think? Or it's temp in or temp out. But it seems to match the web UI closely.
+
 	0x1000: "change_filter_date",
 	0x1001: "change_filter_months",
-	0x101d: "", // some string, value "Off" (blower is currently on, though)
+	0x101c: "spectator_mode", // I think? 0x00 off, 0x01 on?
+	0x101d: "",               // some string, value "Off" (blower is currently on, though)
 
 	0x1122: "sched1_days", //  0 none, 1 all, 2 m-f, 3 sat/sun, 0x04 sun ... 0x0a sat
 	0x1123: "sched1_occuped_time_on",
@@ -556,6 +564,13 @@ var propName = map[propertyID]string{
 	0x2500: "set_room_temp_f",
 	0x2501: "set_humidity_percent",
 	0x2502: "set_pool_temp_f", // also seems to be a copy in 0x250d?
+
+	0x2503: "set_economizer_min_temp_f", //
+	0x2504: "set_freezestat_f",          // alarm if supply air below this for 5 min
+	0x2505: "set_purge_shutoff_f",
+	0x2506: "set_heat_recovery_f",
+	0x250c: "set_disable_ac_at_f",
+
 	// TODO: what is 0x0605? Also water-temp-ish.
 	// TODO: what is 0x0606? It's like 165-200-ish (after divide by 10). Compressor temp?
 	// TODO: what is 0x0607? Similar to 0606 in range but a bit higher usually. Other header bit?
@@ -751,6 +766,74 @@ Change from C to F:
 2024/01/06 15:08:41 prop_0x1a18 changed [03 00 00] => [03 00 13]
 2024/01/06 15:08:42 sessions_ended = 4
 
+
+set: Disable A/C at 60F
+
+ [ 4]: S: 03 25 0c 03 00 3c
+
+
+ set freezestat to 44F
+
+ [ 4]: S: 03 25 04 03 00 2c
+
+set Economizer Min Temperature to 89 F
+
+[ 4]: S: 03 25 03 03 00 59
+
+set purge shutoff 55F
+
+[ 4]: S: 03 25 05 03 00 37
+
+set heat recovery to 64F
+
+[ 4]: S: 03 25 06 03 00 40
+
+set event time hours to 2
+
+2024/01/06 18:29:51 [ 4]: S: 03 03 11 03 00 02
+2024/01/06 18:29:51 prop_0x0311 changed [08 00 01 00 00 00 18 01] => [08 00 02 00 00 00 18 01]
+
+set purge time 17 minutes
+
+2024/01/06 18:30:55 [ 4]: S: 03 03 0d 03 00 11
+2024/01/06 18:30:55 prop_0x0108 ("time") changed 18:30 [e0 00] => 18:30 [e4 00]
+2024/01/06 18:30:55 prop_0x030d changed [08 00 0f 00 00 00 3c 05] => [08 00 11 00 00 00 3c 05]
+
+Stop blower:
+
+2024/01/06 18:33:00 [ 4]: S: 03 0c 01 03 00 00
+2024/01/06 18:33:00 prop_0x120d changed "Ready" => "Disabled"
+2024/01/06 18:33:00 prop_0x120e changed [02 02] => [02 00]
+2024/01/06 18:33:00 prop_0x0c01 changed [09 01 01] => [09 01 00]
+
+Start blower:
+
+2024/01/06 18:34:04 [ 4]: S: 03 0c 01 03 00 01
+2024/01/06 18:34:04 prop_0x0c01 changed [09 01 00] => [09 01 01]
+....
+2024/01/06 18:35:08 prop_0x120e changed [02 00] => [02 02]
+...
+2024/01/06 18:52:38 prop_0x120d changed "Disabled" => "Ready"  (when I sent another command later; probably didn't take this long)
+
+turn on spectator mode for 1 hour:
+
+2024/01/06 18:52:37 prop_0x0108 ("time") changed 18:51 [94 00] => 18:52 [9c 00]
+2024/01/06 18:52:38 [ 4]: S: 03 03 11 03 00 01 10 1c 03 00 01
+2024/01/06 18:52:38 prop_0x0311 changed [08 00 02 00 00 00 18 01] => [08 00 01 00 00 00 18 01]
+
+03
+   03 11
+      03
+       00 01
+   10 1c
+      03
+       00 01
+
+System restart:
+
+18:56:47 [ 4]: S: 03 01 1a 03 00 01
+2024/01/06 18:56:47 prop_0x120d changed "Ready" => "Disabled"
+2024/01/06 18:56:47 prop_0x120e changed [02 02] => [02 00]
 
 
 */
