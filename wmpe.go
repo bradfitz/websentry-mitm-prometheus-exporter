@@ -207,8 +207,8 @@ func (p *proxy) serveProps(w http.ResponseWriter, r *http.Request) {
 	wantMD := r.FormValue("format") == "md"
 
 	if wantMD {
-		fmt.Fprintf(w, `| Code | Name | Type | Sample Value | Sample, Decoded | Query Frequency | 
-| -----| ---- | ---- | ------------ | --------------- | --------------- | 
+		fmt.Fprintf(w, `| Code | Name | Type | Sample Value | Sample, Decoded | 
+| -----| ---- | ---- | ------------ | --------------- | 
 `)
 	} else {
 		fmt.Fprintf(w, "<html><body><h1>props</h1><table cellpadding=5 cellspacing=1 border=1>\n")
@@ -222,7 +222,6 @@ func (p *proxy) serveProps(w http.ResponseWriter, r *http.Request) {
 		return ps[i].prop < ps[j].prop
 	})
 
-	uptimeMin := int(time.Since(startTime).Minutes())
 	for _, st := range ps {
 		if wantMD {
 			last := strings.Trim(st.last.StringHex(), "[]")
@@ -238,20 +237,12 @@ func (p *proxy) serveProps(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			freq := "on web save"
-			if st.prop == 0x1220 {
-				freq = "2/min (why?)"
-			}
-			if st.changes >= uptimeMin-2 {
-				freq = "1/min"
-			}
 			fields := []string{
 				strings.TrimPrefix(st.prop.StringHex(), "prop_"),
 				st.prop.Name(),
 				"`0x" + fmt.Sprintf(last[:2]) + "`",
 				"<nobr>`" + sampleVal + "`</nobr>",
 				sampleDecoded,
-				freq,
 			}
 			fmt.Fprintf(w, "| %s |\n", strings.Join(fields, " | "))
 			continue
@@ -581,8 +572,8 @@ var properties = map[propertyID]*propertyMeta{
 		Decoded: "0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat",
 	},
 	0x0110: {
-		Sample:  "08 31 32 33 34 35 36 37 38",
-		Decoded: `"12345678"`,
+		Sample:  "09 31 32 33 34 35 36 37 38 39",
+		Decoded: `"123456789"`,
 	},
 }
 
