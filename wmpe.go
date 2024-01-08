@@ -204,7 +204,15 @@ func (p *proxy) serveProps(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	fmt.Fprintf(w, "<html><body><h1>props</h1><table cellpadding=5 cellspacing=1 border=1>\n")
+	wantMD := r.FormValue("format") == "md"
+
+	if wantMD {
+		fmt.Fprintf(w, `| Code | Name | Type | Sample Value | Sample, Decoded | Query Frequency | 
+| -----| ---- | ---- | ------------ | --------------- | --------------- | 
+`)
+	} else {
+		fmt.Fprintf(w, "<html><body><h1>props</h1><table cellpadding=5 cellspacing=1 border=1>\n")
+	}
 
 	var ps []*propStats
 	for _, st := range p.prop {
@@ -214,8 +222,40 @@ func (p *proxy) serveProps(w http.ResponseWriter, r *http.Request) {
 		return ps[i].prop < ps[j].prop
 	})
 
+	uptimeMin := int(time.Since(startTime).Minutes())
 	for _, st := range ps {
+		if wantMD {
+			last := strings.Trim(st.last.StringHex(), "[]")
+			sampleVal := last[3:]
+			sampleDecoded := st.last.DecodedStringOrEmpty()
 
+			if m, ok := properties[st.prop]; ok {
+				if m.Sample != "" {
+					sampleVal = m.Sample
+				}
+				if m.Decoded != "" {
+					sampleDecoded = m.Decoded
+				}
+			}
+
+			freq := "on web save"
+			if st.prop == 0x1220 {
+				freq = "2/min (why?)"
+			}
+			if st.changes >= uptimeMin-2 {
+				freq = "1/min"
+			}
+			fields := []string{
+				strings.TrimPrefix(st.prop.StringHex(), "prop_"),
+				st.prop.Name(),
+				"`0x" + fmt.Sprintf(last[:2]) + "`",
+				"<nobr>`" + sampleVal + "`</nobr>",
+				sampleDecoded,
+				freq,
+			}
+			fmt.Fprintf(w, "| %s |\n", strings.Join(fields, " | "))
+			continue
+		}
 		fmt.Fprintf(w, "<tr><td>%s</td><td>%s</td><td>%v</td><td>%v</td><td>%s</td><td>%s</td></tr>\n",
 			st.prop.StringHex(),
 			st.prop.Name(),
@@ -226,8 +266,9 @@ func (p *proxy) serveProps(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	fmt.Fprintf(w, "</table></body></html>\n")
-
+	if !wantMD {
+		fmt.Fprintf(w, "</table></body></html>\n")
+	}
 }
 
 func (p *proxy) serveLast(w http.ResponseWriter, r *http.Request) {
@@ -518,6 +559,34 @@ func (p propertyID) String() string {
 	return p.StringHex()
 }
 
+type propertyMeta struct {
+	Sample  string // "00 05 0f 0c" (without type byte)
+	Decoded string
+}
+
+var properties = map[propertyID]*propertyMeta{
+	0x010b: {
+		Decoded: "0x00 for GMT, 0x06 for PST (GMT, -03:30, AST -4, EST -5, CST -6, MST -7, PST -8, -9, -10)",
+	},
+	0x010e: {
+		Decoded: "0x03 for C, 0x04 for F; affects misc other properties?",
+	},
+	0x1122: {
+		Decoded: "0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat",
+	},
+	0x1142: {
+		Decoded: "0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat",
+	},
+	0x1162: {
+		Decoded: "0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat",
+	},
+	0x0110: {
+		Sample:  "08 31 32 33 34 35 36 37 38",
+		Decoded: `"12345678"`,
+	},
+}
+
+// TODO: merge this into properties above.
 var propName = map[propertyID]string{
 	0x0100: "version",        // same as version_string, but in 4 bytes
 	0x0101: "version_string", // e.g. "5.15.12"
@@ -866,6 +935,26 @@ first nibble of third byte, never starts with 0xf
     166 8
     179 c
 
+
+Top changing properties after ~1441 minutes heating:
+
+      2 0x2303
+      3 0x0107 ("date")
+    112 0x060a
+    327 0x0605
+    330 0x0604 ("pool_temp_f")
+    574 0x0601 ("room_temp_f")
+    612 0x0608
+    704 0x0609
+    738 0x0603 ("outside_air_f")
+    798 0x0610
+    910 0x0602 ("supply_air_f")
+    918 0x0600 ("humidity_percent")
+   1260 0x0607
+   1292 0x0606
+   1318 0x1a18
+   1363 0x0e0c
+   1441 0x0108 ("time")
 
 
 
