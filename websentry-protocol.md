@@ -18,16 +18,16 @@ The dehumidifier unit connects to TCP port `websentry.seresco.net:1030` once a m
 
 All messages from client to server or server to client have a 7 byte header. The header is:
 
-* 3 bytes: `x70 x83 x9e` (the only frame header I've ever seen)
+* 3 bytes: `0x70 0x83 0x9e` (the only frame header I've ever seen)
 * 2 byte checksum (TODO: which checksum?)
 * 2 byte length (big endian) of the following payload
 
-## Message types
+## Message function codes
 
-The first byte of frame's payload is its type. Types seen are:
+The first byte of frame's payload is its function code. Codes seen are:
 
 * `0x00`, "Init": Client-to-server initial message upon connect. Contains the unit's MAC address at least. Not sure hwat else.
-* `0x02`, "Query": Server sends this to client to query a list of properties. Client also replies with this message type to reply.
+* `0x02`, "Query": Server sends this to client to query a list of properties. Client also replies with this message function code to reply.
 * `0x03`, "Set": Server sends this to client to change a parameter when set from the https://apps.dehumidifiedairsolutions.com cloud control panel.
 * `0x08`, unknown. Server sends a dozen of these after the queries and the client replies, but not sure what they are yet. TODO: figure these out.
 
@@ -42,7 +42,7 @@ number.
 
 ## Exchanges after init
 
-After the client sends an init, the server can then send `Query`, `Set`, or `0x08` messages, each of which the client then replies to, with the same type.
+After the client sends an init, the server can then send `Query`, `Set`, or `0x08` messages, each of which the client then replies to. The reply message has the same function code.
 
 ## Server `Query` message
 
