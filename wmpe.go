@@ -32,6 +32,7 @@ iptables -t nat -I PREROUTING 1 -s 10.15.25.34 -p tcp -m multiport --dports 1030
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"html"
@@ -39,6 +40,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -50,6 +52,7 @@ var (
 	verbose        = flag.Bool("verbose", false, "verbose logging")
 	flagListen     = flag.String("listen", ":1030", "listen address for binary protocol")
 	flagListenHTTP = flag.String("listen-http", ":1031", "listen address for the prometheus exporter (serving at /metrics)")
+	flagRawLogFile = flag.String("raw-log", "", "if non-empty, path to append raw protocol logs to, in JSON form")
 )
 
 func main() {
@@ -333,21 +336,83 @@ func (p *proxy) handleWebsentryConn(c *net.TCPConn) {
 	defer outc.Close()
 
 	s := &proxySession{
-		p:    p,
-		c:    c,
-		outc: outc.(*net.TCPConn),
+		start: time.Now(),
+		p:     p,
+		c:     c,
+		outc:  outc.(*net.TCPConn),
 	}
 	s.run()
+	s.durSec = time.Since(s.start).Seconds()
 
 	p.mu.Lock()
 	p.lastSession = s
 	p.mu.Unlock()
+
+	p.writeRawLog(s)
+}
+
+func (p *proxy) writeRawLog(s *proxySession) {
+	if *flagRawLogFile == "" {
+		return
+	}
+
+	type frame struct {
+		N int    `json:",omitempty"`
+		C []byte `json:",omitempty"`
+		S []byte `json:",omitempty"`
+	}
+
+	js := struct {
+		Start  time.Time
+		DurSec float64
+		Frames []frame
+	}{
+		Start:  s.start,
+		DurSec: s.durSec,
+	}
+	for _, f := range s.frames {
+		jf := frame{N: int(f.pktNum)}
+		if f.sender == senderClient {
+			jf.C = []byte(f.data)
+		} else if f.sender == senderServer {
+			jf.S = []byte(f.data)
+		}
+		js.Frames = append(js.Frames, jf)
+	}
+
+	jb, err := json.MarshalIndent(js, "", "\t")
+	if err != nil {
+		log.Printf("failed to marshal raw log: %v", err)
+		return
+	}
+	jb = append(jb, '\n')
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	f, err := os.OpenFile(*flagRawLogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("failed to open raw log file %q: %v", *flagRawLogFile, err)
+		return
+	}
+	if _, err := f.Write(jb); err != nil {
+		f.Close()
+		log.Printf("failed to write raw log file %q: %v", *flagRawLogFile, err)
+		return
+	}
+	if err := f.Close(); err != nil {
+		log.Printf("failed to close raw log file %q: %v", *flagRawLogFile, err)
+		return
+	}
 }
 
 type proxySession struct {
 	p    *proxy
 	c    *net.TCPConn // incoming (from unit)
 	outc *net.TCPConn
+
+	start  time.Time
+	durSec float64
 
 	mu      sync.Mutex
 	pktNum  uint8
