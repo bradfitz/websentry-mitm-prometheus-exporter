@@ -306,7 +306,7 @@ func (p *proxy) serveLast(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "<tr><td>%s</td><td>%s</td><td>%s</td></tr>\n",
 			k.StringHex(),
 			k.Name(),
-			html.EscapeString(s.propVal[k]),
+			html.EscapeString(s.propVal[k].String()),
 		)
 	}
 
@@ -430,7 +430,7 @@ type proxySession struct {
 	mu      sync.Mutex
 	pktNum  uint8
 	frames  []frame
-	propVal map[propertyID]string
+	propVal map[propertyID]propertyValue
 }
 
 func (s *proxySession) run() {
@@ -551,9 +551,9 @@ func (s *proxySession) addFrame(sender sender, b []byte) frame {
 			}
 			s.p.notePropertyValue(prop, val)
 			if s.propVal == nil {
-				s.propVal = map[propertyID]string{}
+				s.propVal = map[propertyID]propertyValue{}
 			}
-			s.propVal[prop] = val.String()
+			s.propVal[prop] = val
 		})
 	}
 
