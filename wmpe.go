@@ -53,10 +53,21 @@ var (
 	flagListen     = flag.String("listen", ":1030", "listen address for binary protocol")
 	flagListenHTTP = flag.String("listen-http", ":1031", "listen address for the prometheus exporter (serving at /metrics)")
 	flagRawLogFile = flag.String("raw-log", "", "if non-empty, path to append raw protocol logs to, in JSON form")
+	flagDecode     = flag.Bool("decode", false, "decode the --raw-log file but don't run a server")
 )
 
 func main() {
 	flag.Parse()
+	if *flagDecode {
+		if *flagRawLogFile == "" {
+			log.Fatal("--decode requires --raw-log")
+		}
+		if err := decodeFile(*flagRawLogFile); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	ln, err := net.Listen("tcp", *flagListen)
 	if err != nil {
 		log.Fatal(err)
@@ -351,27 +362,29 @@ func (p *proxy) handleWebsentryConn(c *net.TCPConn) {
 	p.writeRawLog(s)
 }
 
+type sessionJSON struct {
+	Start  time.Time
+	DurSec float64
+	Frames []frameJSON
+}
+
+type frameJSON struct {
+	N int    `json:",omitempty"`
+	C []byte `json:",omitempty"`
+	S []byte `json:",omitempty"`
+}
+
 func (p *proxy) writeRawLog(s *proxySession) {
 	if *flagRawLogFile == "" {
 		return
 	}
 
-	type frame struct {
-		N int    `json:",omitempty"`
-		C []byte `json:",omitempty"`
-		S []byte `json:",omitempty"`
-	}
-
-	js := struct {
-		Start  time.Time
-		DurSec float64
-		Frames []frame
-	}{
+	js := sessionJSON{
 		Start:  s.start,
 		DurSec: s.durSec,
 	}
 	for _, f := range s.frames {
-		jf := frame{N: int(f.pktNum)}
+		jf := frameJSON{N: int(f.pktNum)}
 		if f.sender == senderClient {
 			jf.C = []byte(f.data)
 		} else if f.sender == senderServer {
@@ -532,8 +545,9 @@ func (s *proxySession) addFrame(sender sender, b []byte) frame {
 			if v, ok := val.Float64(); ok {
 				if name := prop.String(); name != "" {
 					s.p.setMetric(name, v)
+				} else {
+					s.p.setMetric(prop.StringHex(), v)
 				}
-				s.p.setMetric(prop.StringHex(), v)
 			}
 			s.p.notePropertyValue(prop, val)
 			if s.propVal == nil {
@@ -636,6 +650,10 @@ var properties = map[propertyID]*propertyMeta{
 	0x1162: {
 		Decoded: "0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat",
 	},
+	0x0103: {
+		Sample:  "07 5b cd 15",
+		Decoded: "123456789",
+	},
 	0x0110: {
 		Sample:  "09 31 32 33 34 35 36 37 38 39",
 		Decoded: `"123456789"`,
@@ -667,7 +685,14 @@ var propName = map[propertyID]string{
 	0x0601: "room_temp_f",
 	0x0602: "supply_air_f",
 	0x0603: "outside_air_f",
-	0x0604: "pool_temp_f", // I think? Or it's temp in or temp out. But it seems to match the web UI closely.
+	0x0604: "pool_temp_f",     // inlet (from pool to unit)
+	0x0605: "pool_temp_out_f", // outlet (usually bit warmer than inlet)
+	0x0606: "high_pressure_psi",
+	0x0607: "low_pressure_psi",
+	0x0608: "evaporator_temp_f",
+	0x0609: "suction_temp_f",
+	0x0610: "discharge_temp_f",
+	0x060a: "superheat_temp_f",
 
 	0x1000: "change_filter_date",
 	0x1001: "change_filter_months",
@@ -698,14 +723,6 @@ var propName = map[propertyID]string{
 	0x2505: "set_purge_shutoff_f",
 	0x2506: "set_heat_recovery_f",
 	0x250c: "set_disable_ac_at_f",
-
-	// TODO: what is 0x0605? Also water-temp-ish.
-	// TODO: what is 0x0606? It's like 165-200-ish (after divide by 10). Compressor temp?
-	// TODO: what is 0x0607? Similar to 0606 in range but a bit higher usually. Other header bit?
-	// TODO: what is 0x0608? Seems to match pool or air temp, kinda.
-	// TODO: what is 0x0609?
-	// TODO: what is 0x060a? Often like 16-27 after divide by 10.
-	// TODO: what is 0x0610? Seems to match pool or air temp, but higher.
 }
 
 func (p propertyID) Name() string {
@@ -817,6 +834,40 @@ func (s *proxySession) copy(sender sender, src, dst *net.TCPConn) error {
 		_, err = dst.Write(buf[:totalLen])
 		if err != nil {
 			return fmt.Errorf("%s: write to peer error: %v", sender, err)
+		}
+	}
+}
+
+func decodeFile(fname string) error {
+	f, err := os.Open(fname)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	jd := json.NewDecoder(f)
+
+	p := new(proxy)
+
+	for {
+		var s sessionJSON
+		err := jd.Decode(&s)
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Printf("## Time: %v\n", s.Start)
+
+		ps := &proxySession{p: p}
+
+		for _, f := range s.Frames {
+			if f.C != nil {
+				ps.addFrame(senderClient, f.C)
+			}
+			if f.S != nil {
+				ps.addFrame(senderServer, f.S)
+			}
 		}
 	}
 }
