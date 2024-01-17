@@ -868,11 +868,14 @@ func decodeFile(fname string) error {
 
 	p := new(proxy)
 
+	// series of property changes, each with a query and response.
+	hist := map[propertyID][]propertyValue{}
+
 	for {
 		var s sessionJSON
 		err := jd.Decode(&s)
 		if err == io.EOF {
-			return nil
+			break
 		}
 		if err != nil {
 			return err
@@ -889,7 +892,16 @@ func decodeFile(fname string) error {
 				ps.addFrame(senderServer, f.S)
 			}
 		}
+
+		for p := range ps.propVal {
+			if p.Name() != "" {
+				continue
+			}
+			hist[p] = append(hist[p], ps.propVal[p])
+		}
 	}
+
+	return nil
 }
 
 /*
