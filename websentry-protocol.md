@@ -88,8 +88,7 @@ The type bytes I've seen are:
 * `0x03`: 2 byte
 * `0x05`: 4 bytes of four numbers? used for verion number at least
 * `0x06`: uint16 scaled by 10. Divide the uint16 by 10 to get the value (used for temperatures, humidity percent, ...)
-* `0x08`: 7 bytes; often a stored setting of a few bytes and then ... something else
-* `0x09`: 2 bytes
+* `0x08`: 7 bytes; seems to be three uint16 values: the current value, minimum acceptable value, maximum acceptable value, and then 1 byte of the allowed granularity of the value. If the current value is zero (and less than the minimum value), that seems to mean unset or unsupport or not applicable. Or something.
 * `0x0a`: date: 4 bytes: year-1900, month, day, zero.
 * `0x0b`: time: 4 bytes: hour, minute, seconds * 4, 0
 * `0x0c`: 4 byte IP address (used for gateway, DNS server, resolved server IP, netmask, ...)

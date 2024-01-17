@@ -590,7 +590,7 @@ func parsePropValue(p string) (val propertyValue, remain string, err error) {
 		n = 4
 	case 5:
 		n = 4
-	case 8:
+	case propertyUint16InRange:
 		n = 7
 	case propertyTypeUint32:
 		n = 4
@@ -612,11 +612,11 @@ const (
 	propertyTypeTime           propertyType = 0x0b // 4 bytes: hour, min, (seconds<<2), zero
 	propertyTypeVersion        propertyType = 0x05 // [05 00 05 0f 0c] for version 5.15.12
 	propertyTypeUint32         propertyType = 0x12 // 4 bytes (for serial numbrer at least)
+	propertyUint16InRange      propertyType = 0x08 // 7 bytes: 3 uint16s: current, min acceptable, max acceptable + 1 byte granularity? if current == 0 and less than min, unset/not applicable.
 	// TODO: what are these? only their sizes are known.
 	// 0x01: 1 byte (not bool; can be 0x05)
 	// 0x02: 1 byte (not bool; can be 00, 01, 02, 03, ...)
 	// 0x03: 2 bytes
-	// 0x08: 7 bytes (e.g. "00 5a 00 00 00 64 05" or often "00 00 00 00 00 64 05")
 	// 0x09: 2 bytes
 )
 
@@ -694,6 +694,8 @@ var propName = map[propertyID]string{
 	0x0610: "discharge_temp_f",
 	0x060a: "superheat_temp_f",
 
+	0x0701: "blower_speed_percent", // I think. It's the only value that's 90 (matching UI) in range 0-100: [08 00 5a 00 00 00 64 05]
+
 	0x1000: "change_filter_date",
 	0x1001: "change_filter_months",
 	0x101c: "spectator_mode", // I think? 0x00 off, 0x01 on?
@@ -711,8 +713,11 @@ var propName = map[propertyID]string{
 	0x1163: "sched3_occuped_time_on",
 	0x1164: "sched3_occuped_time_off",
 
+	0x1207: "set_high_pressure_psi",
 	0x120d: "blower_state_string", // I think? like "Ready" or "Disabled"
 	0x120e: "blower_state",        // 0x00 off, 0x02 on
+	0x1214: "set_low_pressure_psi",
+
 	0x2003: "resolved_websentry_ip",
 	0x2500: "set_room_temp_f",
 	0x2501: "set_humidity_percent",
@@ -722,7 +727,10 @@ var propName = map[propertyID]string{
 	0x2504: "set_freezestat_f",          // alarm if supply air below this for 5 min
 	0x2505: "set_purge_shutoff_f",
 	0x2506: "set_heat_recovery_f",
+	0x2508: "set_supply_air_f", // I think. It's the only value set to 84 and matches https://photos.google.com/photo/AF1QipMsMLz4YwAK1Q4VTIIqcn92ggfPIKOTrQBL95lh
 	0x250c: "set_disable_ac_at_f",
+
+	// TODO: super heat setting. (several things are currently 15; toggle on TouchPanel to see what changes)
 }
 
 func (p propertyID) Name() string {
@@ -780,6 +788,18 @@ func (v propertyValue) DecodedStringOrEmpty() string {
 		if len(v.binary) == 5 {
 			return fmt.Sprintf("%d", uint32(v.binary[1])<<24|uint32(v.binary[2])<<16|uint32(v.binary[3])<<8|uint32(v.binary[4]))
 		}
+	case propertyUint16InRange:
+		if len(v.binary) != 8 {
+			return "invalid-uint16-in-range"
+		}
+		cur, lo, hi := uint16(v.binary[1])<<8|uint16(v.binary[2]), uint16(v.binary[3])<<8|uint16(v.binary[4]), uint16(v.binary[5])<<8|uint16(v.binary[6])
+		step := uint16(v.binary[7])
+		if cur == 0 && lo != 0 {
+			return fmt.Sprintf("- (%d-%d by %d)", lo, hi, step)
+		}
+		// TODO: add unit based on property ID. But then we need the property ID
+		// either in receiver or passed in.
+		return fmt.Sprintf("%d (%d-%d by %d)", cur, lo, hi, step)
 	}
 	return ""
 }
