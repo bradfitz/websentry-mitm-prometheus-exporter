@@ -698,6 +698,33 @@ var propName = map[propertyID]string{
 
 	0x1000: "change_filter_date",
 	0x1001: "change_filter_months",
+
+	// Advanced > Ventillation > Exhaust Fans
+	0x1016: "exhaust_fan_unoccupied_percent",
+	0x1017: "exhaust_fan_occupied_percent",
+	0x1018: "fan1_capacity_percent",
+	0x101b: "spectator_fan_percent",
+	0x1004: "exhaust_fan_stop_on_overload",
+
+	// Advanced > Ventillation > Main Blower
+	0x0c04: "blower_normal_speed_percent",
+	0x0c05: "blower_secondary_speed_percent",
+
+	// Advanced > Ventillation > Ventillation Options
+	0x010f: "fire_alarm_reset", // 0=auto, 1=manual
+
+	// Network > WebSentry
+	0x0333: "websentry_connect_interval_sec",
+
+	// Network >> TCP/IP
+	0x0400: "dhcp_enabled",
+	0x0300: "start_network_device_sec",
+	0x0303: "reboot_device_min",
+	0x0304: "reboot_delay_sec",
+
+	// Network >> LON
+	0x2300: "lon_enabled", // 0=off, 1=read/write, 2=read-only
+
 	0x101c: "spectator_mode", // I think? 0x00 off, 0x01 on?
 	0x101d: "",               // some string, value "Off" (blower is currently on, though)
 
@@ -712,6 +739,10 @@ var propName = map[propertyID]string{
 	0x1162: "sched3_days", //  0 none, 1 all, 2 m-f, 3 sat/sun, 0x04 sun ... 0x0a sat
 	0x1163: "sched3_occuped_time_on",
 	0x1164: "sched3_occuped_time_off",
+
+	// Advanced > Control Status ("internal params" docs say)
+	0x1a18: "adv_control_status_internal_room_heat",
+	0x0e0c: "adv_control_status_internal_heat_on",
 
 	0x1207: "set_high_pressure_psi",
 	0x120d: "blower_state_string", // I think? like "Ready" or "Disabled"
@@ -901,6 +932,10 @@ func decodeFile(fname string) error {
 		ps := &proxySession{p: p}
 
 		for _, f := range s.Frames {
+			if f.N == 1 {
+				fmt.Printf("  % 02x\n", f.C)
+				continue
+			}
 			if f.C != nil {
 				ps.addFrame(senderClient, f.C)
 			}
