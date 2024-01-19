@@ -881,7 +881,11 @@ func decodeFile(fname string) error {
 	p := new(proxy)
 
 	// series of property changes, each with a query and response.
-	hist := map[propertyID][]propertyValue{}
+	type valAndTime struct {
+		v propertyValue
+		t time.Time
+	}
+	hist := map[propertyID][]valAndTime{}
 
 	for {
 		var s sessionJSON
@@ -909,7 +913,7 @@ func decodeFile(fname string) error {
 			if p.Name() != "" {
 				continue
 			}
-			hist[p] = append(hist[p], ps.propVal[p])
+			hist[p] = append(hist[p], valAndTime{v: ps.propVal[p], t: s.Start})
 		}
 	}
 
