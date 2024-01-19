@@ -760,9 +760,6 @@ func (v propertyValue) String() string {
 }
 
 func (v propertyValue) DecodedStringOrEmpty() string {
-	if f, ok := v.Float64(); ok {
-		return fmt.Sprint(f)
-	}
 	switch v.Type() {
 	case propertyTypeVarString:
 		if len(v.binary) > 2 {
@@ -801,6 +798,9 @@ func (v propertyValue) DecodedStringOrEmpty() string {
 		// either in receiver or passed in.
 		return fmt.Sprintf("%d (%d-%d by %d)", cur, lo, hi, step)
 	}
+	if f, ok := v.Float64(); ok {
+		return fmt.Sprint(f)
+	}
 	return ""
 }
 
@@ -817,6 +817,18 @@ func (v propertyValue) Float64() (_ float64, ok bool) {
 		if len(v.binary) == 3 {
 			u16 := uint16(v.binary[1])<<8 | uint16(v.binary[2])
 			return float64(u16) / 10, true
+		}
+	case propertyUint16InRange:
+		if len(v.binary) == 8 {
+			return float64(uint16(v.binary[1])<<8 | uint16(v.binary[2])), true
+		}
+	case 3, 9:
+		if len(v.binary) == 3 {
+			return float64(uint16(v.binary[1])<<8 | uint16(v.binary[2])), true
+		}
+	case 2:
+		if len(v.binary) == 2 {
+			return float64(v.binary[1]), true
 		}
 	}
 	return 0, false
