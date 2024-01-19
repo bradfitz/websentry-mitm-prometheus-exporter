@@ -1111,6 +1111,42 @@ Top changing properties after ~1441 minutes heating:
    1363 0x0e0c
    1441 0x0108 ("time")
 
+# Looking for the state/mode bits.
 
+Maybe:
+
+2024/01/18 09:49:27 prop_0x0e0c changed 0 => 6
+2024/01/18 09:49:27 prop_0x1a18 changed 15 => 12
+
+"Seresco LON Virtual Objects" doc has some clues but haven't found it.
+
+ // Advanced > Control Status ("internal params" docs say)
+// prop_0x1a18 is room heat number like 19 or 3 or 0 or 24 etc
+// prop_0x0e0c is heat on. 0 or 1 or 5 or 10
+
+// Advanced > Ventillation > Exhaust Fans
+// Fan 1 capacity %: prop_0x1018 changed 99 (5-100 by 1) => 98 (5-100 by 1)
+// Exhaust Fan, Occupied (%) prop_0x1017 changed 99 (1-100 by 1) => 97 (1-100 by 1)
+// Exhaust Fan, Unoccupied (%) prop_0x1016 changed 0 (0-100 by 1) => 6 (0-100 by 1)
+// Spectators (%): 99 to 100 prop_0x101b changed 99 (1-200 by 1) => 100 (1-200 by 1)
+// Stop on overload: no=>yes prop_0x1004 changed [09 00 00] => [09 00 01]
+
+// Advanced > Ventillation > Main Blower
+// Normal speed %: prop_0x0c04 changed 90 (10-100 by 5) => 89 (10-100 by 5)
+// Secondary Speed %: prop_0x0c05 changed 60 (10-100 by 5) => 61 (10-100 by 5)
+
+// > Ven Opts
+// Fire Alarm Reset: manual to auto: prop_0x010f changed [09 03 01] => [09 03 00]
+
+// WebSentry communication interval sec:
+// prop_0x0333 changed 60 (5-600 by 5) => 15 (5-600 by 5)
+
+// Advanced > Network > TCP/IP:
+// DHCP yes to no: prop_0x0400 changed [09 00 01] => [09 00 00]
+// Start network device (sec): prop_0x0300 changed 120 (1-600 by 5) => 60 (1-600 by 5)
+// Reboot device (minutes): prop_0x0303 changed 60 (1-600 by 10) => 61 (1-600 by 10)
+// Reboot delay (sec): prop_0x0304 changed 10 (1-60 by 1) => 11 (1-60 by 1)
+
+// LON enabled: off to readonly:  prop_0x2300 changed [09 2c 00] => [09 2c 02] (1 is read/write))
 
 */
