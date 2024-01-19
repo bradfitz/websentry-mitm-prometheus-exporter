@@ -678,8 +678,8 @@ var propName = map[propertyID]string{
 
 	0x0402: "ip_address",
 	0x0403: "subnet_mask",
-	0x0404: "gateway",    // or DNS server? TODO: check which way
-	0x0405: "dns_server", // or gateway? TODO: check which way
+	0x0404: "gateway",
+	0x0405: "dns_server",
 
 	0x0600: "humidity_percent",
 	0x0601: "room_temp_f",
