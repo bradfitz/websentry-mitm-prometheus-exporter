@@ -40,6 +40,8 @@ probably also contains the version number of the software or at least some
 indicator of the client's capabilities. It doesn't seem to contain the serial
 number.
 
+The final byte is usually `0x07` but seems to change to `0x06` and later to `0x04` and back to `0x07` when you've used the touch screen to change settings. It's probably some "local dirty state" bits to tell the server to poll more property statuses later to figure out what changed.
+
 ## Exchanges after init
 
 After the client sends an init, the server can then send `Query`, `Set`, or `0x08` messages, each of which the client then replies to. The reply message has the same function code.
