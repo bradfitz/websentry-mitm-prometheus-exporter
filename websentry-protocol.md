@@ -19,7 +19,7 @@ The dehumidifier unit connects to TCP port `websentry.seresco.net:1030` once a m
 All messages from client to server or server to client have a 7 byte header. The header is:
 
 * 3 bytes: `0x70 0x83 0x9e` (the only frame header I've ever seen)
-* 2 byte checksum (TODO: which checksum?)
+* 2 byte checksum (CRC-16/MODBUS: https://reveng.sourceforge.io/crc-catalogue/16.htm#crc.cat.crc-16-modbus, or in Go: https://pkg.go.dev/github.com/sigurn/crc16#CRC16_MODBUS) of the payload, not including any part of the 7 byte header. Big endian, like everything else.
 * 2 byte length (big endian) of the following payload
 
 ## Message function codes

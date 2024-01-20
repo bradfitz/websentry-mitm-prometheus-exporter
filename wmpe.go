@@ -32,6 +32,7 @@ iptables -t nat -I PREROUTING 1 -s 10.15.25.34 -p tcp -m multiport --dports 1030
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -45,6 +46,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sigurn/crc16"
 )
 
 var (
@@ -1387,3 +1390,13 @@ Jan 20 11:36:35 tox websentry-proxy-start[7184]: 2024/01/20 11:36:35 sessions_en
 
 
 */
+
+var crc16Tab = crc16.MakeTable(crc16.CRC16_MODBUS)
+
+func checksum(b []byte) uint16 {
+	return crc16.Checksum(b, crc16Tab)
+}
+
+func putChecksum(dst, pay []byte) {
+	binary.BigEndian.PutUint16(dst, checksum(pay))
+}
