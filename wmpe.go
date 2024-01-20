@@ -534,6 +534,10 @@ func (f frame) isChangeRequest() bool {
 	return f.sender == senderServer && len(f.data) > 7 && f.data[7] == 0x03
 }
 
+func (f frame) isClientInit() bool {
+	return f.sender == senderClient && len(f.data) > 7 && f.data[7] == 0x00
+}
+
 func (s *proxySession) addFrame(sender sender, b []byte) frame {
 	s.mu.Lock()
 	defer s.mu.Unlock()
