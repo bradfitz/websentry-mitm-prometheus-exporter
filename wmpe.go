@@ -41,7 +41,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -296,18 +295,18 @@ func (p *proxy) serveLast(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, "</pre><h2>props</h2><table>\n")
 
-	var keys []propertyID
-	for k := range s.propVal {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-
-	for _, k := range keys {
-		fmt.Fprintf(w, "<tr><td>%s</td><td>%s</td><td>%s</td></tr>\n",
-			k.StringHex(),
-			k.Name(),
-			html.EscapeString(s.propVal[k].String()),
-		)
+	for _, f := range s.frames {
+		if !f.isPropertyRequest() {
+			continue
+		}
+		f.foreachPropertyRequest(func(k propertyID) {
+			fmt.Fprintf(w, "<tr><td>%d/%d</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+				f.pktNum, f.pktNum+1,
+				k.StringHex(),
+				k.Name(),
+				html.EscapeString(s.propVal[k].String()),
+			)
+		})
 	}
 
 	fmt.Fprintf(w, "</table></body></html>\n")
@@ -524,6 +523,10 @@ func (f frame) isPropertyResponse() bool {
 	return f.sender == senderClient && len(f.data) > 7 && f.data[7] == 0x02
 }
 
+func (f frame) isPropertyRequest() bool {
+	return f.sender == senderServer && len(f.data) > 7 && f.data[7] == 0x02
+}
+
 func (f frame) isChangeRequest() bool {
 	return f.sender == senderServer && len(f.data) > 7 && f.data[7] == 0x03
 }
@@ -558,6 +561,18 @@ func (s *proxySession) addFrame(sender sender, b []byte) frame {
 	}
 
 	return f
+}
+
+func (f frame) foreachPropertyRequest(fn func(propertyID)) {
+	if !f.isPropertyRequest() {
+		return
+	}
+	rem := f.data[8:] // guaranteed at least this size by isPropertyRequest
+	for len(rem) >= 3 && rem[2] == 0x0f {
+		id := uint16(rem[0])<<8 | uint16(rem[1])
+		fn(propertyID(id))
+		rem = rem[3:]
+	}
 }
 
 func parsePropValue(p string) (val propertyValue, remain string, err error) {
