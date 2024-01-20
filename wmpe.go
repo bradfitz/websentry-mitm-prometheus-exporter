@@ -473,7 +473,7 @@ type frame struct {
 	data   string // binary; including 7 byte header
 }
 
-func parsePropResponse(qf, f frame, onProp func(propertyID, propertyValue)) {
+func parsePropResponse(qf, f frame, onProp func(propertyValue)) {
 	if qf.sender != senderServer {
 		return
 	}
@@ -504,15 +504,15 @@ func parsePropResponse(qf, f frame, onProp func(propertyID, propertyValue)) {
 			return
 		}
 		rem = rem[2:]
-		val, newRem, err := parsePropValue(rem)
+		id := propertyID(uint16(prop[1]) | uint16(prop[0])<<8)
+		val, newRem, err := parsePropValue(id, rem)
 		if err != nil {
 			log.Printf("failed to parse prop % 02x value: %v", rem, err)
 			return
 		}
 		//log.Printf("  val=% 02x, newRem=% 02x\n", val.binary, newRem)
-
 		rem = newRem
-		onProp(propertyID(uint16(prop[1])|uint16(prop[0])<<8), val)
+		onProp(val)
 	}
 	if len(qrem) != 0 {
 		log.Printf("unexpected trailing bytes in server query frame: % 02x", qrem)
@@ -544,7 +544,8 @@ func (s *proxySession) addFrame(sender sender, b []byte) frame {
 
 	if f.isPropertyResponse() && len(s.frames) >= 2 {
 		qf := s.frames[len(s.frames)-2]
-		parsePropResponse(qf, f, func(prop propertyID, val propertyValue) {
+		parsePropResponse(qf, f, func(val propertyValue) {
+			prop := val.id
 			if v, ok := val.Float64(); ok {
 				if name := prop.String(); name != "" {
 					s.p.setMetric(name, v)
@@ -575,7 +576,7 @@ func (f frame) foreachPropertyRequest(fn func(propertyID)) {
 	}
 }
 
-func parsePropValue(p string) (val propertyValue, remain string, err error) {
+func parsePropValue(id propertyID, p string) (val propertyValue, remain string, err error) {
 	if len(p) == 0 {
 		return val, "", fmt.Errorf("empty property value")
 	}
@@ -590,7 +591,7 @@ func parsePropValue(p string) (val propertyValue, remain string, err error) {
 		if len(p) < 2+n {
 			return val, "", fmt.Errorf("short variable length string")
 		}
-		return propertyValue{binary: p[:2+n]}, p[2+n:], nil
+		return propertyValue{id, p[:2+n]}, p[2+n:], nil
 	}
 
 	var n int
@@ -613,7 +614,7 @@ func parsePropValue(p string) (val propertyValue, remain string, err error) {
 	if len(p) < 1+n {
 		return val, "", fmt.Errorf("short property value")
 	}
-	return propertyValue{binary: p[:1+n]}, p[1+n:], nil
+	return propertyValue{id, p[:1+n]}, p[1+n:], nil
 }
 
 type propertyType byte
@@ -631,7 +632,7 @@ const (
 	// TODO: what are these? only their sizes are known.
 	// 0x01: 1 byte (not bool; can be 0x05)
 	// 0x02: 1 byte (not bool; can be 00, 01, 02, 03, ...)
-	// 0x03: 2 bytes
+	// 0x03: 2 bytes // enum maybe where first byte is the enum type?
 	// 0x09: 2 bytes
 )
 
@@ -645,25 +646,60 @@ func (p propertyID) String() string {
 }
 
 type propertyMeta struct {
+	Name    string // TODO: not yet used or dup checked; should merge propNames map into properties
 	Sample  string // "00 05 0f 0c" (without type byte)
 	Decoded string
+	Enum    map[byte]string
+}
+
+// enum type 0x08 (e.g. [09 08 01] for all days)
+var enumDays = map[byte]string{
+	0:  "none",
+	1:  "all-days",
+	2:  "mon-fri",
+	3:  "sat-sun",
+	4:  "sun",
+	5:  "mon",
+	6:  "tue",
+	7:  "wed",
+	8:  "thu",
+	9:  "fri",
+	10: "sat",
 }
 
 var properties = map[propertyID]*propertyMeta{
 	0x010b: {
 		Decoded: "0x00 for GMT, 0x06 for PST (GMT, -03:30, AST -4, EST -5, CST -6, MST -7, PST -8, -9, -10)",
+		Enum: map[byte]string{ // enum type 0x0b
+			0x00: "GMT",
+			0x01: "-03:30",
+			0x02: "AST",
+			0x03: "EST",
+			0x04: "CST",
+			0x05: "MST",
+			0x06: "PST",
+			0x07: "-09:00",
+			0x08: "-10:00",
+		},
 	},
 	0x010e: {
 		Decoded: "0x03 for C, 0x04 for F; affects misc other properties?",
+		Enum: map[byte]string{ // enum type 0x2d
+			0x03: "Celsius",
+			0x04: "Fahrenheit",
+		},
 	},
 	0x1122: {
 		Decoded: "0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat",
+		Enum:    enumDays,
 	},
 	0x1142: {
 		Decoded: "0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat",
+		Enum:    enumDays,
 	},
 	0x1162: {
 		Decoded: "0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat",
+		Enum:    enumDays,
 	},
 	0x0103: {
 		Sample:  "07 5b cd 15",
@@ -672,6 +708,14 @@ var properties = map[propertyID]*propertyMeta{
 	0x0110: {
 		Sample:  "09 31 32 33 34 35 36 37 38 39",
 		Decoded: `"123456789"`,
+	},
+	0x2300: {
+		Name: "lon_enabled",
+		Enum: map[byte]string{ // enum type 0x2c
+			0: "off",
+			1: "read/write",
+			2: "read-only",
+		},
 	},
 }
 
@@ -685,7 +729,7 @@ var propName = map[propertyID]string{
 	0x010b: "time_zone",            // 0x00 for GMT, 0x06 for PST (GMT, -03:30, AST -4, EST -5, CST -6, MST -7, PST -8, -9, -10)
 	0x010e: "temp_unit",            // 0x03 for C, 0x04 for F; affects misc other properties?
 	0x0110: "serial_number_string", // 0x0103 but in string form
-	0x0116: "",                     // type 3 with val 00 11 (decimal 17, maybe variant: "NE Modbus/LON?")
+	0x0116: "software_variant",     // type 3 with val 00 11 (decimal 17, maybe variant: "NE Modbus/LON?")
 	0x011a: "set_reboot",           // "S: 03 01 1a 03 00 01" to reboot
 
 	0x0311: "set_event_time_hours",
@@ -791,6 +835,7 @@ func (p propertyID) StringHex() string {
 }
 
 type propertyValue struct {
+	id     propertyID
 	binary string // as binary, starting with the type byte
 }
 
@@ -843,11 +888,46 @@ func (v propertyValue) DecodedStringOrEmpty() string {
 		if cur == 0 && lo != 0 {
 			return fmt.Sprintf("- (%d-%d by %d)", lo, hi, step)
 		}
-		// TODO: add unit based on property ID. But then we need the property ID
-		// either in receiver or passed in.
+		// TODO: add unit based on property ID.
 		return fmt.Sprintf("%d (%d-%d by %d)", cur, lo, hi, step)
+	case 9: // enum value?
+		if len(v.binary) == 3 {
+			if pm, ok := properties[v.id]; ok {
+				if s, ok := pm.Enum[v.binary[2]]; ok {
+					return s
+				}
+			}
+			switch v.binary[1] { // enum type byte?
+			case 0:
+				switch v.binary[2] {
+				case 0:
+					return "disabled"
+				case 1:
+					return "enabled"
+				default:
+					return fmt.Sprintf("%d(et=0)", v.binary[2])
+				}
+
+			case 1:
+				switch v.binary[2] {
+				case 0:
+					return "false(et=1)"
+				case 1:
+					return "true(et=1)"
+				default:
+					return fmt.Sprintf("%d(et=1)", v.binary[2])
+				}
+			}
+		}
 	}
+
 	if f, ok := v.Float64(); ok {
+		if v.id == 0x0116 { // software variant?
+			switch f {
+			case 17:
+				return "NE Modbus/LON" // Only unit I have, so I'm guessing it's this string to match the web values.
+			}
+		}
 		return fmt.Sprint(f)
 	}
 	return ""
@@ -871,10 +951,15 @@ func (v propertyValue) Float64() (_ float64, ok bool) {
 		if len(v.binary) == 8 {
 			return float64(uint16(v.binary[1])<<8 | uint16(v.binary[2])), true
 		}
-	case 3, 9:
+	case 3:
 		if len(v.binary) == 3 {
 			return float64(uint16(v.binary[1])<<8 | uint16(v.binary[2])), true
 		}
+	case 9: // enum; first byte is enum type, second byte is uint8 value.
+		if len(v.binary) == 3 {
+			return float64(v.binary[2]), true
+		}
+
 	case 2:
 		if len(v.binary) == 2 {
 			return float64(v.binary[1]), true
@@ -1201,5 +1286,104 @@ Maybe:
 // Reboot delay (sec): prop_0x0304 changed 10 (1-60 by 1) => 11 (1-60 by 1)
 
 // LON enabled: off to readonly:  prop_0x2300 changed [09 2c 00] => [09 2c 02] (1 is read/write))
+
+## After a restart:
+
+Jan 20 10:40:04 tox websentry-proxy-start[7119]: 2024/01/20 10:40:04 sessions_started = 10
+Jan 20 10:40:05 tox websentry-proxy-start[7119]: 2024/01/20 10:40:05 prop_0x1220 changed 100 => 0
+Jan 20 10:40:05 tox websentry-proxy-start[7119]: 2024/01/20 10:40:05 prop_0x0108 ("time") changed 10:39:54 => 10:40:04
+Jan 20 10:40:05 tox websentry-proxy-start[7119]: 2024/01/20 10:40:05 prop_0x0600 ("humidity_percent") changed 54.9 => 54.8
+Jan 20 10:40:05 tox websentry-proxy-start[7119]: 2024/01/20 10:40:05 prop_0x0604 ("pool_temp_f") changed 66.7 => 66.6
+Jan 20 10:40:05 tox websentry-proxy-start[7119]: 2024/01/20 10:40:05 prop_0x0606 ("high_pressure_psi") changed 192.7 => 191.8
+Jan 20 10:40:05 tox websentry-proxy-start[7119]: 2024/01/20 10:40:05 prop_0x0607 ("low_pressure_psi") changed 197.7 => 197.4
+Jan 20 10:40:05 tox websentry-proxy-start[7119]: 2024/01/20 10:40:05 prop_0x0608 ("evaporator_temp_f") changed 64.6 => 64.7
+Jan 20 10:40:05 tox websentry-proxy-start[7119]: 2024/01/20 10:40:05 prop_0x060a ("superheat_temp_f") changed 13.2 => 13.4
+Jan 20 10:40:05 tox websentry-proxy-start[7119]: 2024/01/20 10:40:05 prop_0x091e changed false(et=1) => true(et=1)
+Jan 20 10:40:05 tox websentry-proxy-start[7119]: 2024/01/20 10:40:05 prop_0x0e0c ("adv_control_status_internal_heat_on") changed 4 => 0
+Jan 20 10:40:05 tox websentry-proxy-start[7119]: 2024/01/20 10:40:05 prop_0x1227 changed 2 => 0
+Jan 20 10:40:05 tox websentry-proxy-start[7119]: 2024/01/20 10:40:05 prop_0x1a18 ("adv_control_status_internal_room_heat") changed 6 => 0
+Jan 20 10:40:06 tox websentry-proxy-start[7119]: 2024/01/20 10:40:06 sessions_ended = 10
+
+Jan 20 10:43am approximately, transitioned from "heating mode" (room) on to off to on
+
+The client init final byte might be a bitmask of state? normally 0x07, changes to 0x04 for a bit, then bottom two bits are set again.
+
+  70 83 9e e8 e6 00 12 00 ff 00 02 05 04 01 0d 00 90 c2 0c 02 b3 01 20 02 07
+## Time: 2024-01-20 10:39:54.264483473 -0800 PST
+  70 83 9e e8 e6 00 12 00 ff 00 02 05 04 01 0d 00 90 c2 0c 02 b3 01 20 02 07
+## Time: 2024-01-20 10:40:05.147378131 -0800 PST
+  70 83 9e e9 a6 00 12 00 ff 00 02 05 04 01 0d 00 90 c2 0c 02 b3 01 20 02 04
+## Time: 2024-01-20 10:40:21.761667561 -0800 PST
+  70 83 9e e9 a6 00 12 00 ff 00 02 05 04 01 0d 00 90 c2 0c 02 b3 01 20 02 04
+## Time: 2024-01-20 10:40:38.453582792 -0800 PST
+  70 83 9e e9 a6 00 12 00 ff 00 02 05 04 01 0d 00 90 c2 0c 02 b3 01 20 02 04
+## Time: 2024-01-20 10:40:55.074033806 -0800 PST
+  70 83 9e e9 a6 00 12 00 ff 00 02 05 04 01 0d 00 90 c2 0c 02 b3 01 20 02 04
+## Time: 2024-01-20 10:41:11.737971174 -0800 PST
+  70 83 9e e8 e6 00 12 00 ff 00 02 05 04 01 0d 00 90 c2 0c 02 b3 01 20 02 07
+## Time: 2024-01-20 10:41:28.424343832 -0800 PST
+  70 83 9e e8 e6 00 12 00 ff 00 02 05 04 01 0d 00 90 c2 0c 02 b3 01 20 02 07
+
+## After another restart,
+
+A "stabilize" in here?
+
+Jan 20 11:35:43 tox websentry-proxy-start[7184]: 2024/01/20 11:35:43 sessions_started = 149
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x0108 ("time") changed 11:35:26 => 11:35:43
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x0603 ("outside_air_f") changed 64.2 => 64.4
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x0606 ("high_pressure_psi") changed 192.2 => 192.3
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x0607 ("low_pressure_psi") changed 197.5 => 198
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x0610 ("discharge_temp_f") changed 76.8 => 76.9
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x0701 ("blower_speed_percent") changed 0 (0-100 by 5) => 90 (0-100 by 5)
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x0900 changed false(et=1) => true(et=1)
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x090e changed false(et=1) => true(et=1)
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x0111 changed 0 => 1
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x012b changed false(et=1) => true(et=1)
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x0c03 changed 1 => 2
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x100f changed 0 => 1
+Jan 20 11:35:44 tox websentry-proxy-start[7184]: 2024/01/20 11:35:44 prop_0x1b2b changed 0 => 3
+Jan 20 11:35:45 tox websentry-proxy-start[7184]: 2024/01/20 11:35:45 sessions_ended = 149
+
+
+Jan 20 11:36:00 tox websentry-proxy-start[7184]: 2024/01/20 11:36:00 sessions_started = 150
+Jan 20 11:36:00 tox websentry-proxy-start[7184]: 2024/01/20 11:36:00 prop_0x0108 ("time") changed 11:35:43 => 11:35:59
+Jan 20 11:36:00 tox websentry-proxy-start[7184]: 2024/01/20 11:36:00 prop_0x0600 ("humidity_percent") changed 55.2 => 54.9
+Jan 20 11:36:00 tox websentry-proxy-start[7184]: 2024/01/20 11:36:00 prop_0x0602 ("supply_air_f") changed 76.2 => 77.2
+Jan 20 11:36:00 tox websentry-proxy-start[7184]: 2024/01/20 11:36:00 prop_0x0603 ("outside_air_f") changed 64.4 => 64.5
+Jan 20 11:36:00 tox websentry-proxy-start[7184]: 2024/01/20 11:36:00 prop_0x0607 ("low_pressure_psi") changed 198 => 197.4
+
+Jan 20 11:36:01 tox websentry-proxy-start[7184]: 2024/01/20 11:36:01 sessions_ended = 150
+Jan 20 11:36:17 tox websentry-proxy-start[7184]: 2024/01/20 11:36:17 sessions_started = 151
+Jan 20 11:36:17 tox websentry-proxy-start[7184]: 2024/01/20 11:36:17 prop_0x1220 changed 0 => 100
+Jan 20 11:36:17 tox websentry-proxy-start[7184]: 2024/01/20 11:36:17 prop_0x0108 ("time") changed 11:35:59 => 11:36:16
+Jan 20 11:36:17 tox websentry-proxy-start[7184]: 2024/01/20 11:36:17 prop_0x0600 ("humidity_percent") changed 54.9 => 55.2
+Jan 20 11:36:17 tox websentry-proxy-start[7184]: 2024/01/20 11:36:17 prop_0x0602 ("supply_air_f") changed 77.2 => 77.1
+Jan 20 11:36:17 tox websentry-proxy-start[7184]: 2024/01/20 11:36:17 prop_0x0603 ("outside_air_f") changed 64.5 => 64.6
+Jan 20 11:36:17 tox websentry-proxy-start[7184]: 2024/01/20 11:36:17 prop_0x0606 ("high_pressure_psi") changed 192.3 => 191.6
+Jan 20 11:36:17 tox websentry-proxy-start[7184]: 2024/01/20 11:36:17 prop_0x0607 ("low_pressure_psi") changed 197.4 => 197.2
+Jan 20 11:36:17 tox websentry-proxy-start[7184]: 2024/01/20 11:36:17 prop_0x0609 ("suction_temp_f") changed 85 => 85.2
+Jan 20 11:36:17 tox websentry-proxy-start[7184]: 2024/01/20 11:36:17 prop_0x0610 ("discharge_temp_f") changed 76.9 => 77
+Jan 20 11:36:17 tox websentry-proxy-start[7184]: 2024/01/20 11:36:17 prop_0x091e changed true(et=1) => false(et=1)
+Jan 20 11:36:18 tox websentry-proxy-start[7184]: 2024/01/20 11:36:18 sessions_ended = 151
+
+Jan 20 11:36:33 tox websentry-proxy-start[7184]: 2024/01/20 11:36:33 sessions_started = 152
+Jan 20 11:36:33 tox websentry-proxy-start[7184]: 2024/01/20 11:36:33 prop_0x0108 ("time") changed 11:36:16 => 11:36:32
+Jan 20 11:36:33 tox websentry-proxy-start[7184]: 2024/01/20 11:36:33 prop_0x0601 ("room_temp_f") changed 69.7 => 69.6
+Jan 20 11:36:33 tox websentry-proxy-start[7184]: 2024/01/20 11:36:33 prop_0x0602 ("supply_air_f") changed 77.1 => 76.9
+Jan 20 11:36:33 tox websentry-proxy-start[7184]: 2024/01/20 11:36:33 prop_0x0606 ("high_pressure_psi") changed 191.6 => 191.8
+Jan 20 11:36:33 tox websentry-proxy-start[7184]: 2024/01/20 11:36:33 prop_0x0607 ("low_pressure_psi") changed 197.2 => 196.6
+Jan 20 11:36:33 tox websentry-proxy-start[7184]: 2024/01/20 11:36:33 prop_0x0608 ("evaporator_temp_f") changed 64.6 => 64.5
+Jan 20 11:36:33 tox websentry-proxy-start[7184]: 2024/01/20 11:36:33 prop_0x0609 ("suction_temp_f") changed 85.2 => 85.4
+Jan 20 11:36:34 tox websentry-proxy-start[7184]: 2024/01/20 11:36:34 prop_0x0e02 changed 0 => 1
+Jan 20 11:36:34 tox websentry-proxy-start[7184]: 2024/01/20 11:36:34 prop_0x100f changed 1 => 3
+Jan 20 11:36:34 tox websentry-proxy-start[7184]: 2024/01/20 11:36:34 prop_0x120e ("blower_state") changed 0 => 2
+Jan 20 11:36:34 tox websentry-proxy-start[7184]: 2024/01/20 11:36:34 prop_0x1227 changed 0 => 2
+Jan 20 11:36:34 tox websentry-proxy-start[7184]: 2024/01/20 11:36:34 prop_0x1336 changed 0 => 2
+Jan 20 11:36:34 tox websentry-proxy-start[7184]: 2024/01/20 11:36:34 prop_0x1612 changed 5 => 0
+Jan 20 11:36:34 tox websentry-proxy-start[7184]: 2024/01/20 11:36:34 prop_0x190a changed 0 => 1
+Jan 20 11:36:34 tox websentry-proxy-start[7184]: 2024/01/20 11:36:34 prop_0x1a04 changed 0 => 1
+Jan 20 11:36:35 tox websentry-proxy-start[7184]: 2024/01/20 11:36:35 sessions_ended = 152
+
+
 
 */
