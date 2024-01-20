@@ -711,7 +711,7 @@ var propName = map[propertyID]string{
 	0x0c05: "blower_secondary_speed_percent",
 
 	// Advanced > Ventillation > Ventillation Options
-	0x010f: "fire_alarm_reset", // 0=auto, 1=manual
+	0x010f: "fire_alarm_reset", // 0x03 then second byte 0=auto, 1=manual
 
 	// Network > WebSentry
 	0x0333: "websentry_connect_interval_sec",
@@ -748,11 +748,14 @@ var propName = map[propertyID]string{
 	0x120d: "blower_state_string", // I think? like "Ready" or "Disabled"
 	0x120e: "blower_state",        // 0x00 off, 0x02 on
 	0x1214: "set_low_pressure_psi",
+	0x122c: "oacc_min_hp_change_psi", // I think? Only 5 (1-50) set.
 
 	0x2003: "resolved_websentry_ip",
 	0x2500: "set_room_temp_f",
 	0x2501: "set_humidity_percent",
 	0x2502: "set_pool_temp_f", // also seems to be a copy in 0x250d?
+
+	0x2201: "set_modbus_enabled", //  off-on: S: 03(set) 22 01 03(type) 00 01
 
 	0x2503: "set_economizer_min_temp_f", //
 	0x2504: "set_freezestat_f",          // alarm if supply air below this for 5 min
