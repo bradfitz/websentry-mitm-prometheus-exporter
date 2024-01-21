@@ -822,6 +822,15 @@ var properties = map[propertyID]*propertyMeta{
 			6: "Alarm",
 		},
 	},
+
+	0x1612: {
+		Name: "pool_heating_state_maybe", // I think
+		Enum: map[byte]string{
+			0: "Off",
+			1: "Heating",
+			// ...
+		},
+	},
 }
 
 func init() {
