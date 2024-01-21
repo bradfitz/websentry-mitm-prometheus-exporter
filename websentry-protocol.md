@@ -86,8 +86,8 @@ The type bytes I've seen are:
 ### Fixed width typed values
 
 * `0x01`: 1 byte
-* `0x02`: 1 byte
-* `0x03`: 2 byte
+* `0x02`: 1 byte enum value, specific to that property ID.
+* `0x03`: 2 byte, typed enum, shared between properties. First byte is the enum type, second byte is the value. (TODO: add table of enum types; for now, see the code)
 * `0x05`: 4 bytes of four numbers? used for verion number at least
 * `0x06`: uint16 scaled by 10. Divide the uint16 by 10 to get the value (used for temperatures, humidity percent, ...)
 * `0x08`: 7 bytes; seems to be three uint16 values: the current value, minimum acceptable value, maximum acceptable value, and then 1 byte of the allowed granularity of the value. If the current value is zero (and less than the minimum value), that seems to mean unset or unsupport or not applicable. Or something.

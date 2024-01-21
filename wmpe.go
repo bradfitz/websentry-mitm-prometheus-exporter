@@ -303,11 +303,12 @@ func (p *proxy) serveLast(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		f.foreachPropertyRequest(func(k propertyID) {
-			fmt.Fprintf(w, "<tr><td>%d/%d</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+			fmt.Fprintf(w, "<tr><td>%d/%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
 				f.pktNum, f.pktNum+1,
 				k.StringHex(),
 				k.Name(),
-				html.EscapeString(s.propVal[k].String()),
+				html.EscapeString(s.propVal[k].DecodedStringOrEmpty()),
+				html.EscapeString(s.propVal[k].StringHex()),
 			)
 		})
 	}
@@ -724,6 +725,120 @@ var properties = map[propertyID]*propertyMeta{
 			2: "read-only",
 		},
 	},
+	0x190a: {
+		Name: "dehumidifer_state",
+		Enum: map[byte]string{
+			0: "Disabled",
+			1: "Idle",
+			2: "Dehumidifying",
+			3: "Pending",
+		},
+	},
+	0x100f: {
+		Name: "ventilation_state",
+		Enum: map[byte]string{
+			0:  "Stopped",
+			1:  "Stabilize",
+			2:  "Day Time",
+			3:  "Night Time",
+			4:  "Stopping",
+			5:  "Shutting Down",
+			6:  "Pending Purge",
+			7:  "Purge",
+			8:  "Economizer",
+			9:  "Slave Mode",
+			10: "Freezestat",
+			11: "PendEcono",
+			12: "Spectators",
+		},
+	},
+	0x0111: {
+		Name: "system_mode",
+		Enum: map[byte]string{
+			0: "Startup",
+			1: "Normal",
+			2: "Service",
+			3: "Shut Down",
+			4: "Restart",
+			5: "Off",
+			6: "Night Time",
+			7: "Day Time",
+			8: "Event 1",
+			9: "Event 2",
+		},
+	},
+	0x0e02: {
+		Name: "supply_air_mode",
+		Enum: map[byte]string{
+			0: "Disabled",
+			2: "Cool",
+			1: "Idle",
+			3: "Heat",
+			4: "Hold",
+			5: "HoldCool",
+			6: "HoldHeat",
+		},
+	},
+	0x120e: {
+		Name: "blower_state",
+		Enum: map[byte]string{
+			0:  "Disabled",
+			1:  "No Ventilation",
+			2:  "Ready",
+			3:  "Starting up",
+			4:  "Stabilize",
+			5:  "Min Runtime",
+			6:  "Stable",
+			7:  "Stopping",
+			9:  "Min Stop Time",
+			12: "Shutting Down",
+			14: "External Off",
+			15: "Pump Fault",
+		},
+	},
+	0x1a04: {
+		Name: "room_temp_state",
+		Enum: map[byte]string{
+			0: "Disabled",
+			1: "Idle",
+			2: "Lower",
+			3: "Higher",
+			4: "Partial Cooling",
+			5: "Partial Heating",
+			6: "Econo Cooling",
+		},
+	},
+	// 0x1220: some percent that goes between 0 and 100 when rebooting?
+
+	0x0c03: {
+		Name: "TODO_some_state",
+		Enum: map[byte]string{
+			0: "Power Up",
+			1: "Stopped",
+			2: "Running",
+			3: "Stopping",
+			4: "Pending Start",
+			5: "Stabilize",
+			6: "Alarm",
+		},
+	},
+}
+
+func init() {
+	for id, dm := range properties {
+		if dm.Name == "" {
+			continue
+		}
+		was, ok := propName[id]
+		if !ok {
+			propName[id] = dm.Name
+			continue
+		}
+		if was == dm.Name {
+			continue
+		}
+		panic(fmt.Sprintf("name defined two ways: %q and %q", was, dm.Name))
+	}
 }
 
 // TODO: merge this into properties above.
@@ -812,7 +927,6 @@ var propName = map[propertyID]string{
 
 	0x1207: "set_high_pressure_psi",
 	0x120d: "blower_state_string", // I think? like "Ready" or "Disabled"
-	0x120e: "blower_state",        // 0x00 off, 0x02 on
 	0x1214: "set_low_pressure_psi",
 	0x122c: "oacc_min_hp_change_psi", // I think? Only 5 (1-50) set.
 
@@ -897,6 +1011,14 @@ func (v propertyValue) DecodedStringOrEmpty() string {
 		}
 		// TODO: add unit based on property ID.
 		return fmt.Sprintf("%d (%d-%d by %d)", cur, lo, hi, step)
+	case 2: // enum value that's property-specific without a type?
+		if len(v.binary) == 2 {
+			if pm, ok := properties[v.id]; ok {
+				if s, ok := pm.Enum[v.binary[1]]; ok {
+					return s
+				}
+			}
+		}
 	case 9: // enum value?
 		if len(v.binary) == 3 {
 			if pm, ok := properties[v.id]; ok {
