@@ -831,6 +831,18 @@ var properties = map[propertyID]*propertyMeta{
 			// ...
 		},
 	},
+
+	0x0102: {
+		Name: "board_version",
+		Enum: map[byte]string{ // enum type 0x1b (27)
+			16: "7.0",
+			17: "7.1",
+			18: "7.2",
+			19: "8.0",
+			20: "8.1",
+			21: "9.0",
+		},
+	},
 }
 
 func init() {
@@ -1039,23 +1051,42 @@ func (v propertyValue) DecodedStringOrEmpty() string {
 			case 0:
 				switch v.binary[2] {
 				case 0:
-					return "disabled"
+					return "No"
 				case 1:
-					return "enabled"
-				default:
-					return fmt.Sprintf("%d(et=0)", v.binary[2])
+					return "Yes"
 				}
-
-			case 1:
+			case 1, 46:
 				switch v.binary[2] {
 				case 0:
-					return "false(et=1)"
+					return "Off"
 				case 1:
-					return "true(et=1)"
-				default:
-					return fmt.Sprintf("%d(et=1)", v.binary[2])
+					return "On"
+				case 2:
+					return "N/A" // type 46 only
+				}
+			case 2:
+				switch v.binary[2] {
+				case 0:
+					return "Disabled"
+				case 1:
+					return "Enabled"
+				}
+			case 3:
+				switch v.binary[2] {
+				case 0:
+					return "Auto"
+				case 1:
+					return "Manual"
+				}
+			case 50:
+				switch v.binary[2] {
+				case 0:
+					return "Open"
+				case 1:
+					return "Closed"
 				}
 			}
+			return fmt.Sprintf("%d(et=%d)", v.binary[2], v.binary[1])
 		}
 	}
 
@@ -1522,6 +1553,40 @@ Jan 20 11:36:34 tox websentry-proxy-start[7184]: 2024/01/20 11:36:34 prop_0x190a
 Jan 20 11:36:34 tox websentry-proxy-start[7184]: 2024/01/20 11:36:34 prop_0x1a04 changed 0 => 1
 Jan 20 11:36:35 tox websentry-proxy-start[7184]: 2024/01/20 11:36:35 sessions_ended = 152
 
+### Changing humidity from 54 to 50
+
+Jan 20 20:58:38 tox websentry-proxy-start[7764]: 2024/01/20 20:58:38 sessions_started = 84
+Jan 20 20:58:38 tox websentry-proxy-start[7764]: 2024/01/20 20:58:38 prop_0x0108 ("time") changed 20:58:21 => 20:58:37
+Jan 20 20:58:38 tox websentry-proxy-start[7764]: 2024/01/20 20:58:38 [ 4]: S: 03 25 01 03 00 32
+Jan 20 20:58:38 tox websentry-proxy-start[7764]: 2024/01/20 20:58:38 prop_0x0108 ("time") changed 20:58:37 => 20:58:38
+Jan 20 20:58:39 tox websentry-proxy-start[7764]: 2024/01/20 20:58:39 prop_0x2501 ("set_humidity_percent") changed 54 (35-85 by 1) => 50 (35-85 by 1)
+Jan 20 20:58:39 tox websentry-proxy-start[7764]: 2024/01/20 20:58:39 prop_0x250d changed 54 (35-85 by 1) => 50 (35-85 by 1)
+Jan 20 20:58:40 tox websentry-proxy-start[7764]: 2024/01/20 20:58:40 prop_0x0603 ("outside_air_f") changed 64.5 => 64.6
+Jan 20 20:58:40 tox websentry-proxy-start[7764]: 2024/01/20 20:58:40 prop_0x0606 ("high_pressure_psi") changed 189.7 => 190.6
+Jan 20 20:58:40 tox websentry-proxy-start[7764]: 2024/01/20 20:58:40 prop_0x0607 ("low_pressure_psi") changed 195.6 => 195.1
+Jan 20 20:58:41 tox websentry-proxy-start[7764]: 2024/01/20 20:58:41 prop_0x0e0c ("adv_control_status_internal_heat_on") changed 0 => 4
+Jan 20 20:58:41 tox websentry-proxy-start[7764]: 2024/01/20 20:58:41 prop_0x1a18 ("adv_control_status_internal_room_heat") changed 20 => 3
+Jan 20 20:58:42 tox websentry-proxy-start[7764]: 2024/01/20 20:58:42 prop_0x0108 ("time") changed 20:58:38 => 20:58:41
+Jan 20 20:58:43 tox websentry-proxy-start[7764]: 2024/01/20 20:58:43 sessions_ended = 84
+Jan 20 20:58:58 tox websentry-proxy-start[7764]: 2024/01/20 20:58:58 sessions_started = 85
+Jan 20 20:58:58 tox websentry-proxy-start[7764]: 2024/01/20 20:58:58 prop_0x0108 ("time") changed 20:58:41 => 20:58:58
+Jan 20 20:58:59 tox websentry-proxy-start[7764]: 2024/01/20 20:58:59 prop_0x0606 ("high_pressure_psi") changed 190.6 => 190.2
+Jan 20 20:58:59 tox websentry-proxy-start[7764]: 2024/01/20 20:58:59 prop_0x0607 ("low_pressure_psi") changed 195.1 => 195.7
+Jan 20 20:58:59 tox websentry-proxy-start[7764]: 2024/01/20 20:58:59 prop_0x0609 ("suction_temp_f") changed 85.5 => 85.6
+Jan 20 20:58:59 tox websentry-proxy-start[7764]: 2024/01/20 20:58:59 prop_0x0e0c ("adv_control_status_internal_heat_on") changed 4 => 6
+Jan 20 20:58:59 tox websentry-proxy-start[7764]: 2024/01/20 20:58:59 prop_0x190f changed 0 => 1
+Jan 20 20:58:59 tox websentry-proxy-start[7764]: 2024/01/20 20:58:59 prop_0x1a18 ("adv_control_status_internal_room_heat") changed 3 => 6
+Jan 20 20:59:00 tox websentry-proxy-start[7764]: 2024/01/20 20:59:00 sessions_ended = 85
+
+Jan 20 20:59:31 tox websentry-proxy-start[7764]: 2024/01/20 20:59:31 sessions_started = 87
+Jan 20 20:59:32 tox websentry-proxy-start[7764]: 2024/01/20 20:59:32 prop_0x0108 ("time") changed 20:59:14 => 20:59:31
+Jan 20 20:59:32 tox websentry-proxy-start[7764]: 2024/01/20 20:59:32 prop_0x0600 ("humidity_percent") changed 55.4 => 55.3
+Jan 20 20:59:32 tox websentry-proxy-start[7764]: 2024/01/20 20:59:32 prop_0x0601 ("room_temp_f") changed 69.4 => 69.3
+Jan 20 20:59:32 tox websentry-proxy-start[7764]: 2024/01/20 20:59:32 prop_0x0607 ("low_pressure_psi") changed 195.1 => 195.5
+Jan 20 20:59:32 tox websentry-proxy-start[7764]: 2024/01/20 20:59:32 prop_0x0e0c ("adv_control_status_internal_heat_on") changed 0 => 2
+Jan 20 20:59:32 tox websentry-proxy-start[7764]: 2024/01/20 20:59:32 prop_0x190f changed 2 => 3
+Jan 20 20:59:32 tox websentry-proxy-start[7764]: 2024/01/20 20:59:32 prop_0x1a18 ("adv_control_status_internal_room_heat") changed 10 => 13
+Jan 20 20:59:33 tox websentry-proxy-start[7764]: 2024/01/20 20:59:33 sessions_ended = 87
 
 
 */
