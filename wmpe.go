@@ -637,11 +637,10 @@ const (
 	propertyTypeVersion        propertyType = 0x05 // [05 00 05 0f 0c] for version 5.15.12
 	propertyTypeUint32         propertyType = 0x12 // 4 bytes (for serial numbrer at least)
 	propertyUint16InRange      propertyType = 0x08 // 7 bytes: 3 uint16s: current, min acceptable, max acceptable + 1 byte granularity? if current == 0 and less than min, unset/not applicable.
-	// TODO: what are these? only their sizes are known.
+	propertyEnum               propertyType = 0x02 // 1 byte payload, a property-specific enum
+	propertyTypedEnum          propertyType = 0x09 // 2 byte payload: a kind byte, and a kind-specific enum
+	propertyTypeUint16         propertyType = 0x03 // 2 bytes (uint16, unscaled). but sometimes an enum like type 2. (e.g. 0x0116 software_variant)
 	// 0x01: 1 byte (not bool; can be 0x05)
-	// 0x02: 1 byte (not bool; can be 00, 01, 02, 03, ...)
-	// 0x03: 2 bytes // enum maybe where first byte is the enum type?
-	// 0x09: 2 bytes
 )
 
 type propertyID uint16
@@ -657,57 +656,182 @@ type propertyMeta struct {
 	Name    string // TODO: not yet used or dup checked; should merge propNames map into properties
 	Sample  string // "00 05 0f 0c" (without type byte)
 	Decoded string
-	Enum    map[byte]string
+	Enum2   map[byte]string // for value type 0x02 property-specific enum value (not type 0x03)
+	Enum3   byte            // type 0x03 enum type
 }
 
-// enum type 0x08 (e.g. [09 08 01] for all days)
-var enumDays = map[byte]string{
-	0:  "none",
-	1:  "all-days",
-	2:  "mon-fri",
-	3:  "sat-sun",
-	4:  "sun",
-	5:  "mon",
-	6:  "tue",
-	7:  "wed",
-	8:  "thu",
-	9:  "fri",
-	10: "sat",
+// Enum values for typed enum values (type 0x09) values.
+// e.g. [09 0b 06] is type 0x0b (timezone) value 0x06 (PST).
+var typedEnums = map[byte]map[byte]string{ // type => enum vaue => string
+	0x00: {
+		0: "No",
+		1: "Yes",
+	},
+	0x01: {
+		0: "Off",
+		1: "On",
+	},
+	0x2e: {
+		0: "Off",
+		1: "On",
+		2: "N/A",
+	},
+	0x02: {
+		0: "Disabled",
+		1: "Enabled",
+	},
+	0x03: {
+		0: "Auto",
+		1: "Manual",
+	},
+	0x08: { // day schedule
+		0:  "None",
+		1:  "Daily",
+		2:  "Mon-Fri",
+		3:  "Sat-Sun",
+		4:  "Sun",
+		5:  "Mon",
+		6:  "Tue",
+		7:  "Wed",
+		8:  "Thu",
+		9:  "Fri",
+		10: "Sat",
+	},
+	0x0b: { // time zone
+		0x00: "GMT",
+		0x01: "-03:30",
+		0x02: "AST",
+		0x03: "EST",
+		0x04: "CST",
+		0x05: "MST",
+		0x06: "PST",
+		0x07: "-09:00",
+		0x08: "-10:00",
+	},
+	0x2d: { // temp unit
+		0x03: "Celsius",
+		0x04: "Fahrenheit",
+	},
+	0x2c: {
+		0: "Off",
+		1: "Read/Write",
+		2: "Read-Only",
+	},
+	0x1b: { // board version
+		16: "7.0",
+		17: "7.1",
+		18: "7.2",
+		19: "8.0",
+		20: "8.1",
+		21: "9.0",
+	},
+	0x0d: { // serial baud rate
+		// .... TODO
+	},
+	0x0e: { // serial data bits
+		0: "8 bits",
+		1: "7 bits",
+	},
+	0x0f: { // serial parity bits
+		0: "None",
+		1: "Even",
+		2: "Odd",
+		3: "2 Stop Bits",
+	},
+	0x12: { // refrigerant type
+		2: "R410A",
+	},
+	0x13: { // Stages
+		0: "One Stage",
+		1: "Two Stages",
+		2: "Modulated",
+		3: "Modulated/Staged",
+		4: "Stage-Modulation",
+	},
+	0x30: {
+		0: "1 Stage",
+		1: "2 Stages",
+		2: "Modulated",
+		3: "Low/High",
+	},
+	0x29: {
+		0: "None",
+		1: "Compressor",
+		2: "Auxiliary",
+		3: "Compr & Aux",
+	},
+	0x2b: { // Port
+		0: "None",
+		1: "Port 1/B",
+		2: "Port 2/C",
+		3: "Port 3/D",
+		4: "Port 4",
+		6: "None",
+	},
+	0x06: {
+		0: "0 Volt",
+		1: "10 Volt",
+	},
+	0x25: { // Analog Output Ports
+		0: "None",
+		9: "Modbus",
+		// TODO: ...
+	},
+	0x23: {
+		0: "None",
+		1: "Default",
+		2: "View Only",
+		3: "Control Only",
+	},
+	0x32: {
+		0: "Open",
+		1: "Closed",
+	},
+	0x10: {
+		0: "None",
+		1: "Control Board",
+		2: "Slave Board",
+		3: "LON",
+		4: "Modbus",
+		5: "Broadcast",
+	},
+	0x2a: {
+		0: "Pool 2",
+		1: "Stage 2",
+		2: "Bypass",
+	},
+	0x31: {
+		0: "None",
+		1: "Full",
+		2: "Dehumidification",
+		3: "A/C",
+	},
+	0x28: {
+		0: "AirDir=0?", // TODO: Supply? or Deadband?
+		1: "AirDir=1?", // TODO: Return? Or Demand?
+	},
 }
 
 var properties = map[propertyID]*propertyMeta{
 	0x010b: {
 		Decoded: "0x00 for GMT, 0x06 for PST (GMT, -03:30, AST -4, EST -5, CST -6, MST -7, PST -8, -9, -10)",
-		Enum: map[byte]string{ // enum type 0x0b
-			0x00: "GMT",
-			0x01: "-03:30",
-			0x02: "AST",
-			0x03: "EST",
-			0x04: "CST",
-			0x05: "MST",
-			0x06: "PST",
-			0x07: "-09:00",
-			0x08: "-10:00",
-		},
+		Enum3:   0x0b,
 	},
 	0x010e: {
 		Decoded: "0x03 for C, 0x04 for F; affects misc other properties?",
-		Enum: map[byte]string{ // enum type 0x2d
-			0x03: "Celsius",
-			0x04: "Fahrenheit",
-		},
+		Enum3:   0x2d,
 	},
 	0x1122: {
 		Decoded: "0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat",
-		Enum:    enumDays,
+		Enum3:   0x08,
 	},
 	0x1142: {
 		Decoded: "0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat",
-		Enum:    enumDays,
+		Enum3:   0x08,
 	},
 	0x1162: {
 		Decoded: "0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat",
-		Enum:    enumDays,
+		Enum3:   0x08,
 	},
 	0x0103: {
 		Sample:  "07 5b cd 15",
@@ -718,16 +842,12 @@ var properties = map[propertyID]*propertyMeta{
 		Decoded: `"123456789"`,
 	},
 	0x2300: {
-		Name: "lon_enabled",
-		Enum: map[byte]string{ // enum type 0x2c
-			0: "off",
-			1: "read/write",
-			2: "read-only",
-		},
+		Name:  "lon_enabled",
+		Enum3: 0x2c,
 	},
 	0x190a: {
 		Name: "dehumidifer_state",
-		Enum: map[byte]string{
+		Enum2: map[byte]string{
 			0: "Disabled",
 			1: "Idle",
 			2: "Dehumidifying",
@@ -736,7 +856,7 @@ var properties = map[propertyID]*propertyMeta{
 	},
 	0x100f: {
 		Name: "ventilation_state",
-		Enum: map[byte]string{
+		Enum2: map[byte]string{
 			0:  "Stopped",
 			1:  "Stabilize",
 			2:  "Day Time",
@@ -754,7 +874,7 @@ var properties = map[propertyID]*propertyMeta{
 	},
 	0x0111: {
 		Name: "system_mode",
-		Enum: map[byte]string{
+		Enum2: map[byte]string{
 			0: "Startup",
 			1: "Normal",
 			2: "Service",
@@ -769,7 +889,7 @@ var properties = map[propertyID]*propertyMeta{
 	},
 	0x0e02: {
 		Name: "supply_air_mode",
-		Enum: map[byte]string{
+		Enum2: map[byte]string{
 			0: "Disabled",
 			2: "Cool",
 			1: "Idle",
@@ -781,10 +901,10 @@ var properties = map[propertyID]*propertyMeta{
 	},
 	0x120e: {
 		Name: "blower_state",
-		Enum: map[byte]string{
+		Enum2: map[byte]string{
 			0:  "Disabled",
 			1:  "No Ventilation",
-			2:  "Ready",
+			2:  "Ready", // TODO: is this right? seems like it's blowing in this state.
 			3:  "Starting up",
 			4:  "Stabilize",
 			5:  "Min Runtime",
@@ -798,7 +918,7 @@ var properties = map[propertyID]*propertyMeta{
 	},
 	0x1a04: {
 		Name: "room_temp_state",
-		Enum: map[byte]string{
+		Enum2: map[byte]string{
 			0: "Disabled",
 			1: "Idle",
 			2: "Lower",
@@ -812,7 +932,7 @@ var properties = map[propertyID]*propertyMeta{
 
 	0x0c03: {
 		Name: "TODO_some_state",
-		Enum: map[byte]string{
+		Enum2: map[byte]string{
 			0: "Power Up",
 			1: "Stopped",
 			2: "Running",
@@ -825,7 +945,7 @@ var properties = map[propertyID]*propertyMeta{
 
 	0x1612: {
 		Name: "pool_heating_state_maybe", // I think
-		Enum: map[byte]string{
+		Enum2: map[byte]string{
 			0: "Off",
 			1: "Heating",
 			// ...
@@ -833,15 +953,8 @@ var properties = map[propertyID]*propertyMeta{
 	},
 
 	0x0102: {
-		Name: "board_version",
-		Enum: map[byte]string{ // enum type 0x1b (27)
-			16: "7.0",
-			17: "7.1",
-			18: "7.2",
-			19: "8.0",
-			20: "8.1",
-			21: "9.0",
-		},
+		Name:  "board_version",
+		Enum3: 0x1b,
 	},
 }
 
@@ -1032,61 +1145,36 @@ func (v propertyValue) DecodedStringOrEmpty() string {
 		}
 		// TODO: add unit based on property ID.
 		return fmt.Sprintf("%d (%d-%d by %d)", cur, lo, hi, step)
-	case 2: // enum value that's property-specific without a type?
+	case propertyEnum:
 		if len(v.binary) == 2 {
 			if pm, ok := properties[v.id]; ok {
-				if s, ok := pm.Enum[v.binary[1]]; ok {
+				if s, ok := pm.Enum2[v.binary[1]]; ok {
 					return s
 				}
 			}
 		}
-	case 9: // enum value?
+	case propertyTypedEnum: // typed enum
 		if len(v.binary) == 3 {
-			if pm, ok := properties[v.id]; ok {
-				if s, ok := pm.Enum[v.binary[2]]; ok {
-					return s
-				}
+			enumType := v.binary[1]
+			enumVal := v.binary[2]
+			if s, ok := typedEnums[enumType][enumVal]; ok {
+				return s
 			}
-			switch v.binary[1] { // enum type byte?
-			case 0:
-				switch v.binary[2] {
-				case 0:
-					return "No"
-				case 1:
-					return "Yes"
-				}
-			case 1, 46:
-				switch v.binary[2] {
-				case 0:
-					return "Off"
-				case 1:
-					return "On"
-				case 2:
-					return "N/A" // type 46 only
-				}
-			case 2:
-				switch v.binary[2] {
-				case 0:
-					return "Disabled"
-				case 1:
-					return "Enabled"
-				}
-			case 3:
-				switch v.binary[2] {
-				case 0:
-					return "Auto"
-				case 1:
-					return "Manual"
-				}
-			case 50:
-				switch v.binary[2] {
-				case 0:
-					return "Open"
-				case 1:
-					return "Closed"
-				}
+			switch enumType {
+			case 13:
+				return fmt.Sprintf("%d(t=SerialSpeed)", enumVal)
+			case 36:
+				return fmt.Sprintf("%d(t=AnalogIn)", enumVal)
+			case 37:
+				return fmt.Sprintf("%d(t=Jn-n)", enumVal)
+			case 38:
+				return fmt.Sprintf("%d(t=DigIn)", enumVal)
+			case 39:
+				return fmt.Sprintf("%d(t=DigOut)", enumVal)
+			case 28:
+				return fmt.Sprintf("%d(t=SensorType)", enumVal)
 			}
-			return fmt.Sprintf("%d(et=%d)", v.binary[2], v.binary[1])
+			return fmt.Sprintf("%d(et=%d)", enumVal, enumType)
 		}
 	}
 
@@ -1120,16 +1208,16 @@ func (v propertyValue) Float64() (_ float64, ok bool) {
 		if len(v.binary) == 8 {
 			return float64(uint16(v.binary[1])<<8 | uint16(v.binary[2])), true
 		}
-	case 3:
+	case propertyTypeUint16:
 		if len(v.binary) == 3 {
 			return float64(uint16(v.binary[1])<<8 | uint16(v.binary[2])), true
 		}
-	case 9: // enum; first byte is enum type, second byte is uint8 value.
+	case propertyTypedEnum: // enum; first byte is enum type, second byte is uint8 value.
 		if len(v.binary) == 3 {
 			return float64(v.binary[2]), true
 		}
 
-	case 2:
+	case propertyEnum:
 		if len(v.binary) == 2 {
 			return float64(v.binary[1]), true
 		}
