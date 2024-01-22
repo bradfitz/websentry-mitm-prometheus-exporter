@@ -280,14 +280,14 @@ The client replies with the property IDs and `0x00` for success. (Not sure what 
 | 0x101b |  | `0x08` | <nobr>`00 63 00 01 00 c8 01`</nobr> |  |
 | 0x101d |  | `0x07` | <nobr>`03 4f 66 66`</nobr> | "Off" |
 | 0x1122 | sched1_days | `0x09` | <nobr>`08 00`</nobr> | 0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat |
-| 0x1123 | sched1_occuped_time_on | `0x0b` | <nobr>`08 00 00 00`</nobr> | 08:00:00 |
-| 0x1124 | sched1_occuped_time_off | `0x0b` | <nobr>`14 00 00 00`</nobr> | 20:00:00 |
+| 0x1123 | sched1_occupied_time_on | `0x0b` | <nobr>`08 00 00 00`</nobr> | 08:00:00 |
+| 0x1124 | sched1_occupied_time_off | `0x0b` | <nobr>`14 00 00 00`</nobr> | 20:00:00 |
 | 0x1142 | sched2_days | `0x09` | <nobr>`08 00`</nobr> | 0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat |
-| 0x1143 | sched2_occuped_time_on | `0x0b` | <nobr>`00 00 00 00`</nobr> | 00:00:00 |
-| 0x1144 | sched2_occuped_time_off | `0x0b` | <nobr>`00 0f 00 00`</nobr> | 00:15:00 |
+| 0x1143 | sched2_occupied_time_on | `0x0b` | <nobr>`00 00 00 00`</nobr> | 00:00:00 |
+| 0x1144 | sched2_occupied_time_off | `0x0b` | <nobr>`00 0f 00 00`</nobr> | 00:15:00 |
 | 0x1162 | sched3_days | `0x09` | <nobr>`08 0a`</nobr> | 0=none, 1=all, 2=m-f, 3=sat/sun, 4=sun, 5=mon, ..., 0x0a=sat |
-| 0x1163 | sched3_occuped_time_on | `0x0b` | <nobr>`0a 0f 00 00`</nobr> | 10:15:00 |
-| 0x1164 | sched3_occuped_time_off | `0x0b` | <nobr>`0a 1e 00 00`</nobr> | 10:30:00 |
+| 0x1163 | sched3_occupied_time_on | `0x0b` | <nobr>`0a 0f 00 00`</nobr> | 10:15:00 |
+| 0x1164 | sched3_occupied_time_off | `0x0b` | <nobr>`0a 1e 00 00`</nobr> | 10:30:00 |
 | 0x1200 |  | `0x09` | <nobr>`2f 01`</nobr> |  |
 | 0x1201 |  | `0x09` | <nobr>`00 01`</nobr> |  |
 | 0x1202 |  | `0x09` | <nobr>`12 02`</nobr> |  |

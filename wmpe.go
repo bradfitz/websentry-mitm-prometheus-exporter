@@ -1105,16 +1105,16 @@ var propName = map[propertyID]string{
 	0x101d: "",               // some string, value "Off" (blower is currently on, though)
 
 	0x1122: "sched1_days", //  0 none, 1 all, 2 m-f, 3 sat/sun, 0x04 sun ... 0x0a sat
-	0x1123: "sched1_occuped_time_on",
-	0x1124: "sched1_occuped_time_off",
+	0x1123: "sched1_occupied_time_on",
+	0x1124: "sched1_occupied_time_off",
 
 	0x1142: "sched2_days", //  0 none, 1 all, 2 m-f, 3 sat/sun, 0x04 sun ... 0x0a sat
-	0x1143: "sched2_occuped_time_on",
-	0x1144: "sched2_occuped_time_off",
+	0x1143: "sched2_occupied_time_on",
+	0x1144: "sched2_occupied_time_off",
 
 	0x1162: "sched3_days", //  0 none, 1 all, 2 m-f, 3 sat/sun, 0x04 sun ... 0x0a sat
-	0x1163: "sched3_occuped_time_on",
-	0x1164: "sched3_occuped_time_off",
+	0x1163: "sched3_occupied_time_on",
+	0x1164: "sched3_occupied_time_off",
 
 	// Advanced > Control Status ("internal params" docs say)
 	0x1a18: "adv_control_status_internal_room_heat",
