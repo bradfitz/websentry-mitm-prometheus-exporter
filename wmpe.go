@@ -1738,6 +1738,19 @@ Jan 20 20:59:32 tox websentry-proxy-start[7764]: 2024/01/20 20:59:32 prop_0x1a18
 Jan 20 20:59:33 tox websentry-proxy-start[7764]: 2024/01/20 20:59:33 sessions_ended = 87
 
 
+# Client Init possible parse
+
+         70 83 9e 28 27 00 12  # 7 byte header (magic, checksum, length)
+	         00                # function code 0 = client init?
+			    ff 00            # prop ID ff00?
+				  02 05          # prop-specific enum (0x02), enum value 5
+			    04 01          # prop ID: unit MAC?
+			      0d            # type mac
+			     00 90 c2 xx x xx
+				01 20      # prop ID
+				  02 07      # prop-specific enum (0x02), enum value 7 (also seen: 4 and 6)
+
+
 */
 
 var crc16Tab = crc16.MakeTable(crc16.CRC16_MODBUS)
