@@ -726,7 +726,16 @@ var typedEnums = map[byte]map[byte]string{ // type => enum vaue => string
 		21: "9.0",
 	},
 	0x0d: { // serial baud rate
-		// .... TODO
+		0: "1200",
+		1: "2400",
+		2: "4800",
+		3: "9600",
+		4: "19200",
+		5: "28800",
+		6: "57600",
+		7: "38400",
+		8: "76800",
+		9: "115200",
 	},
 	0x0e: { // serial data bits
 		0: "8 bits",
@@ -753,6 +762,36 @@ var typedEnums = map[byte]map[byte]string{ // type => enum vaue => string
 		1: "2 Stages",
 		2: "Modulated",
 		3: "Low/High",
+	},
+	0x26: {
+		0:  "None",
+		1:  "DI01 (JCOM-9)",
+		2:  "DI02 (J3-1)",
+		3:  "DI03 (J3-2)",
+		4:  "DI04 (J3-3)",
+		5:  "DI05 (J3-4)",
+		6:  "DI06 (J3-5)",
+		7:  "DI07 (J3-6)",
+		8:  "DI08 (J3-7)",
+		9:  "DI09 (J7-1)",
+		10: "DI10 (J7-2)",
+		11: "DI11 (J7-3)",
+		12: "DI12 (J7-4)",
+		13: "DI13 (J7-5)",
+		14: "DI14 (J7-6)",
+		15: "DI15 (J7-7)",
+		16: "DI16 (J8-3)",
+		17: "DI17 (JDIN-1)",
+		18: "DI18 (JDIN-2)",
+		19: "DI19 (JDIN-3)",
+		20: "DI20 (JDIN-4)",
+		21: "DI21 (JDIN-5)",
+		25: "BMS",
+	},
+	0x19: {
+		0: "Init",
+		1: "Normal",
+		2: "Service",
 	},
 	0x29: {
 		0: "None",
@@ -809,6 +848,44 @@ var typedEnums = map[byte]map[byte]string{ // type => enum vaue => string
 	0x28: {
 		0: "AirDir=0?", // TODO: Supply? or Deadband?
 		1: "AirDir=1?", // TODO: Return? Or Demand?
+	},
+	56: {
+		0: "1 Stage",
+		1: "2 Stages",
+		2: "Modulated",
+	},
+	33: {
+		0: "Disabled",
+		1: "All Year",
+		2: "Summer Only",
+	},
+	47: {
+		0: "Classic/Staged",
+		1: "Protocol/Modulated",
+		3: "None",
+	},
+	55: {
+		0: "None",
+		1: "Circuit 1",
+		2: "Circuit 2",
+		3: "All Circuits",
+	},
+	54: {
+		0: "None",
+		1: "1 Stage",
+		2: "2 Stages",
+		3: "Modulated",
+	},
+	20: {
+		0: "Deg*Min",
+		1: "PID",
+		2: "Deg*Min Int",
+	},
+	63: {
+		0: "None",
+		1: "Level 1",
+		2: "Level 2",
+		3: "Level 3",
 	},
 }
 
@@ -1104,17 +1181,33 @@ var propName = map[propertyID]string{
 	0x101c: "spectator_mode", // I think? 0x00 off, 0x01 on?
 	0x101d: "",               // some string, value "Off" (blower is currently on, though)
 
-	0x1122: "sched1_days", //  0 none, 1 all, 2 m-f, 3 sat/sun, 0x04 sun ... 0x0a sat
+	0x1122: "sched1_days",
 	0x1123: "sched1_occupied_time_on",
 	0x1124: "sched1_occupied_time_off",
 
-	0x1142: "sched2_days", //  0 none, 1 all, 2 m-f, 3 sat/sun, 0x04 sun ... 0x0a sat
+	0x1142: "sched2_days",
 	0x1143: "sched2_occupied_time_on",
 	0x1144: "sched2_occupied_time_off",
 
-	0x1162: "sched3_days", //  0 none, 1 all, 2 m-f, 3 sat/sun, 0x04 sun ... 0x0a sat
+	0x1162: "sched3_days",
 	0x1163: "sched3_occupied_time_on",
 	0x1164: "sched3_occupied_time_off",
+
+	0x1182: "sched4_days",
+	0x1183: "sched4_occupied_time_on",
+	0x1184: "sched4_occupied_time_off",
+
+	0x11a2: "sched5_days",
+	0x11a3: "sched5_occupied_time_on",
+	0x11a4: "sched5_occupied_time_off",
+
+	0x11c2: "sched6_days",
+	0x11c3: "sched6_occupied_time_on",
+	0x11c4: "sched6_occupied_time_off",
+
+	0x11e2: "sched7_days",
+	0x11e3: "sched7_occupied_time_on",
+	0x11e4: "sched7_occupied_time_off",
 
 	// Advanced > Control Status ("internal params" docs say)
 	0x1a18: "adv_control_status_internal_room_heat",
@@ -1138,6 +1231,18 @@ var propName = map[propertyID]string{
 	0x2506: "set_heat_recovery_f",
 	0x2508: "set_supply_air_f", // I think. It's the only value set to 84 and matches https://photos.google.com/photo/AF1QipMsMLz4YwAK1Q4VTIIqcn92ggfPIKOTrQBL95lh
 	0x250c: "set_disable_ac_at_f",
+
+	0x3300: "port_b_enabled",
+	0x3301: "port_b_baud",
+	0x3303: "port_b_frame_delay_ms",
+
+	0x3400: "port_c_enabled",
+	0x3401: "port_c_baud",
+	0x3403: "port_c_frame_delay_ms",
+
+	0x3500: "port_d_enabled",
+	0x3501: "port_d_baud",
+	0x3503: "port_d_frame_delay_ms",
 
 	// TODO: super heat setting. (several things are currently 15; toggle on TouchPanel to see what changes)
 }
@@ -1749,6 +1854,13 @@ Jan 20 20:59:33 tox websentry-proxy-start[7764]: 2024/01/20 20:59:33 sessions_en
 			     00 90 c2 xx x xx
 				01 20      # prop ID
 				  02 07      # prop-specific enum (0x02), enum value 7 (also seen: 4 and 6)
+
+
+# Clearing heating fault
+
+[ 4]: S: 03 02 86 03 02 5c
+[ 5]: C: 03 02 86 00
+
 
 
 */
