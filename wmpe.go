@@ -1232,6 +1232,9 @@ var propName = map[propertyID]string{
 	0x2508: "set_supply_air_f", // I think. It's the only value set to 84 and matches https://photos.google.com/photo/AF1QipMsMLz4YwAK1Q4VTIIqcn92ggfPIKOTrQBL95lh
 	0x250c: "set_disable_ac_at_f",
 
+	0x2513: "set_room_temp_unoccupied_f",
+	0x2512: "set_humidity_unoccupied_percent",
+
 	0x3300: "port_b_enabled",
 	0x3301: "port_b_baud",
 	0x3303: "port_b_frame_delay_ms",
@@ -1243,6 +1246,8 @@ var propName = map[propertyID]string{
 	0x3500: "port_d_enabled",
 	0x3501: "port_d_baud",
 	0x3503: "port_d_frame_delay_ms",
+
+	0x2702: "blower_overload_iomap",
 
 	// TODO: super heat setting. (several things are currently 15; toggle on TouchPanel to see what changes)
 }
